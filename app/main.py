@@ -3,7 +3,8 @@ from fastapi import FastAPI, Query
 from app.simplyhired import scrape_simplyhired_jobs
 from app.adzuna import scrape_adzuna_jobs
 from app.whatjobs import scrape_whatjobs_jobs
-from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection
+from app.naukri import scrape_naukri_jobs
+from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection
 from motor.motor_asyncio import AsyncIOMotorCollection
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
@@ -72,6 +73,30 @@ async def scrape_whatjobs(
     
     if jobs:
         await whatjobs_collection.insert_many(jobs)
+        # Convert ObjectId to string for JSON serialization
+        for job in jobs:
+            if "_id" in job:
+                job["_id"] = str(job["_id"])
+
+    return {
+        "query": query,
+        "location": location,
+        "total_jobs_scraped": len(jobs),
+        "status": "success",
+        "data": jobs
+    }
+
+@app.get("/scrape/naukri")
+async def scrape_naukri(
+    query: str = Query(..., example="Data Engineer Intern"),
+    location: str = Query(None, example="Bengaluru")
+    ):
+    # Run the synchronous blocking scraper in a process pool
+    loop = asyncio.get_event_loop()
+    jobs = await loop.run_in_executor(executor, scrape_naukri_jobs, query, location)
+    
+    if jobs:
+        await naukri_collection.insert_many(jobs)
         # Convert ObjectId to string for JSON serialization
         for job in jobs:
             if "_id" in job:
