@@ -69,124 +69,155 @@ def scrape_simplyhired_jobs(search_query: str):
                         title_elem.click()
                         time.sleep(2) # Wait for panel to switch
 
-                        # Locate the right-side details pane.
-                        # We use the unique "Apply" button or similar unique element in that pane anchor.
-                        # SimplyHired usually has an "Apply Now" or "Quick Apply" button in the right pane header.
-                        details_pane = page.locator("aside").first
-                        if not details_pane.count() > 0:
-                            # Fallback: look for a fixed position container or the one containing the description
-                            details_pane = page.locator("div[class*='Fixed'], div[class*='Sticky']").last 
-
-                        # Retry finding the pane by content if generic structure fails
-                        if not details_pane.is_visible():
-                             try:
-                                 # Find the container that holds the "Full Job Description" header
-                                 header = page.locator("h2", has_text="Full Job Description").first
-                                 if header.count() > 0:
-                                     # Go up until we hit the scrollable container (often has 'overflow-y', but we can just use the parent)
-                                     # For now, let's just use the page scroll or focus on the element.
-                                     # Actually, simplyhired splits view: Left is list, Right is details.
-                                     # We will try to scroll the 'window' is sometimes enough if the separate scroll isn't captured?
-                                     # No, usually need to hover and wheel or find the scrollable div.
-                                     pass
-                             except:
-                                 pass
-
-                        # Explicitly try to scroll the element that contains the description
+                        # --- SCROLLING LOGIC ---
+                        # We need to scroll the separate details pane, not the main window.
+                        # Strategy: Hover over the "Quick Apply" / "Apply Now" button area (top of pane)
+                        # and then wheel down.
                         try:
-                            # Focus on the description header and scroll down
-                            desc_header_indicator = page.locator("h2", has_text="Full Job Description").first
-                            if desc_header_indicator.count() > 0:
-                                # Scroll this container into view -> then scroll the container itself.
-                                # Often simplest to click/hover and keyboard page down or mouse wheel
-                                desc_header_indicator.scroll_into_view_if_needed()
-                                
-                                # Method: Mouse wheel on the pane
-                                box = desc_header_indicator.bounding_box()
+                            # Anchor: The Apply button is usually sticky or at the top of the right pane
+                            apply_button = page.locator("a:has-text('Quick Apply'), button:has-text('Quick Apply'), a:has-text('Apply Now'), button:has-text('Apply Now')").first
+                            
+                            if apply_button.count() > 0 and apply_button.is_visible():
+                                # Hover over the center of the pane (slightly below the apply button)
+                                box = apply_button.bounding_box()
                                 if box:
-                                    page.mouse.move(box["x"], box["y"])
-                                    for _ in range(5): # Scroll down a few times
+                                    # Move mouse to the middle of the pane (horizontally) and below the button
+                                    # Assuming pane is roughly 600px wide, allow offset
+                                    page.mouse.move(box["x"], box["y"] + 100)
+                                    
+                                    # Scroll down multiple times to trigger lazy loading
+                                    for _ in range(10): 
                                         page.mouse.wheel(0, 500)
-                                        time.sleep(0.5)
+                                        time.sleep(0.2)
+                            else:
+                                # Fallback: Hover over "Job Details" header if visible
+                                jd_header = page.locator("h2", has_text="Job Details").first
+                                if jd_header.count() > 0:
+                                    jd_header.hover()
+                                    for _ in range(10): 
+                                        page.mouse.wheel(0, 500)
+                                        time.sleep(0.2)
+                                        
                         except Exception as e:
                             print(f"Scrolling error: {e}")
 
-                        time.sleep(1) # Wait for lazy load
+                        time.sleep(1) # Wait for content to settle
 
                     # --- Scrape Detailed View ---
                     
+                    # --- Scrape Detailed View ---
+                    
+                    def safe_get_text(locator):
+                        try:
+                            if locator.count() > 0:
+                                return locator.inner_text().strip()
+                        except:
+                            pass
+                        return "N/A"
+
+                    # Robust extraction helper
+                    def get_section_content(header_text):
+                        # Relaxed: Try standard headers first, then generic text matches
+                        # We use a union selector or try-catch sequence
+                        
+                        # 1. Try Header Tags
+                        header = page.locator(f"h2:has-text('{header_text}'), h3:has-text('{header_text}'), h4:has-text('{header_text}')").first
+                        
+                        # 2. If not found, try generic bold/strong or div with specific text
+                        if header.count() == 0:
+                            header = page.locator(f"div:has-text('{header_text}'), span:has-text('{header_text}'), strong:has-text('{header_text}')").filter(has_text=header_text).last
+                        
+                        if header.count() == 0:
+                            return None
+
+                        # Strategy 1: Immediate Sibling
+                        sibling = header.locator("xpath=following-sibling::div").first
+                        if sibling.count() > 0 and len(sibling.inner_text().strip()) > 0:
+                            return sibling
+                        
+                        # Strategy 2: Parent's Sibling (Header wrapped in div)
+                        parent_sibling = header.locator("xpath=../following-sibling::div").first
+                        if parent_sibling.count() > 0 and len(parent_sibling.inner_text().strip()) > 0:
+                            return parent_sibling
+                        
+                        # Strategy 3: Just the next element in DOM
+                        next_elem = header.locator("xpath=following-sibling::*[1]").first
+                        if next_elem.count() > 0:
+                            return next_elem
+
+                        return None
+
                     # 1. Full Job Description
                     description = "N/A"
-                    # Robust Strategy: Find header "Full Job Description", get all text following it up to the end or next section?
-                    # SimplyHired has a specific div for this usually.
-                    # We'll try specific selectors first, then text-based fallbacks.
-                    
-                    # Try the standard Vercel/Next.js style class if available, else generic.
-                    # Look for the container that *contains* the text "Full Job Description" and is a sibling of the header?
-                    # Usually: <h2>Full Job Description</h2> <div> ... text ... </div>
-                    
-                    desc_header = page.locator("h2", has_text="Full Job Description").first
-                    if desc_header.count() > 0:
-                        # Assumption: Description is in the next sibling div or the parent's next sibling
-                        # We can grab the whole parent text if it's the main container
-                        # Let's try grabbing the div immediately following the header
-                        container = desc_header.locator("xpath=following-sibling::div").first
-                        if container.count() > 0:
-                            description = container.inner_text().strip()
-                        else:
-                            # Maybe it's inside the same parent?
-                            description = desc_header.locator("..").inner_text().strip()
-                            # Clean up: remove the header text itself
-                            description = description.replace("Full Job Description", "").strip()
+                    desc_elem = get_section_content("Full Job Description")
+                    if desc_elem:
+                        description = desc_elem.inner_text().strip()
+                    else:
+                        # Fallback: Search for the container that looks like a description
+                        # Next.js/Chakra often puts it in a div with a specific class or ID, but random classes.
+                        pass
 
                     # 2. Qualifications
-                    # Header: "Qualifications"
                     qualifications = []
-                    qual_header = page.locator("h2", has_text="Quarterifications").first # typo check? No, "Qualifications"
-                    # Actually check for "Qualifications" OR "Requirements"
-                    qual_header = page.locator("h2", has_text="Qualifications").first
-                    if qual_header.count() == 0:
-                         qual_header = page.locator("h2", has_text="Requirements").first
-
-                    if qual_header.count() > 0:
-                        # Usually a list (ul) or chips (divs/spans) follow
-                        # Try finding ul first
-                        ul = qual_header.locator("xpath=following-sibling::ul").first
-                        if ul.count() > 0:
-                            qualifications = [li.inner_text().strip() for li in ul.locator("li").all()]
+                    qual_header_text = "Qualifications"
+                    if page.locator("h2:has-text('Qualifications')").count() == 0:
+                        qual_header_text = "Requirements"
+                    
+                    qual_elem = get_section_content(qual_header_text)
+                    if qual_elem:
+                        # Check for list items
+                        lis = qual_elem.locator("li").all()
+                        if lis:
+                             qualifications = [li.inner_text().strip() for li in lis]
                         else:
-                            # Try div with chips
-                            # Grab next div
-                            next_div = qual_header.locator("xpath=following-sibling::div").first
-                            if next_div.count() > 0:
-                                # Check for chips
-                                chips = next_div.locator("span").all()
-                                if chips:
-                                    qualifications = [c.inner_text().strip() for c in chips if len(c.inner_text().strip()) > 1]
-                                else:
-                                    # Just text lines
-                                    txt = next_div.inner_text()
-                                    qualifications = [t.strip() for t in txt.split('\n') if t.strip()]
+                            # Check for Spans (Chips)
+                            spans = qual_elem.locator("span").all()
+                            qualifications = [s.inner_text().strip() for s in spans if len(s.inner_text().strip()) > 1]
+                            
+                            # If still empty, try splitting text
+                            if not qualifications:
+                                text = qual_elem.inner_text()
+                                qualifications = [l.strip() for l in text.split('\n') if len(l.strip()) > 1]
 
-                    # 3. Job Type (and other Details)
-                    # Header: "Job Details"
+
+                    # 3. Job Type (and Details)
                     job_type = "N/A"
-                    details_header = page.locator("h2", has_text="Job Details").first
-                    if details_header.count() > 0:
-                        # content usually in following div
-                        det_container = details_header.locator("xpath=following-sibling::div").first
-                        if det_container.count() > 0:
-                            text = det_container.inner_text()
-                            # Extract Type
-                            if "Full-time" in text: job_type = "Full-time"
-                            elif "Part-time" in text: job_type = "Part-time"
-                            elif "Contract" in text: job_type = "Contract"
-                            elif "Temporary" in text: job_type = "Temporary"
-                            elif "Internship" in text: job_type = "Internship"
-                            else:
-                                # Fallback: take the first line roughly
-                                lines = text.split('\n')
-                                if lines: job_type = lines[0]
+                    details_elem = get_section_content("Job Details")
+                    if details_elem:
+                        text = details_elem.inner_text()
+                        types = []
+                        if "Full-time" in text: types.append("Full-time")
+                        if "Part-time" in text: types.append("Part-time")
+                        if "Contract" in text: types.append("Contract")
+                        if "Temporary" in text: types.append("Temporary")
+                        if "Internship" in text: types.append("Internship")
+                        
+                        if types:
+                            job_type = ", ".join(types)
+                        else:
+                            lines = text.split('\n')
+                            if lines: job_type = lines[0]
+                    
+                    # --- DEBUG DUMP ---
+                    # If we failed to get a description, dump the HTML
+                    if description == "N/A" or description == "":
+                        print(f"DEBUG: Failed to extract description for '{title}'. Dumping HTML.")
+                        # time is already imported globally
+                        ts = int(time.time())
+                        with open(f"debug_simplyhired_{ts}.html", "w", encoding="utf-8") as f:
+                            f.write(page.content())
+                        # Also take a screenshot
+                        page.screenshot(path=f"debug_simplyhired_{ts}.png")
+                        
+                        # Try one last ditch effort: Get the WHOLE details pane text
+                        # Assuming the pane is the 'aside' or similar
+                        try:
+                           pane = page.locator("aside").first
+                           if pane.count() > 0:
+                               all_text = pane.inner_text()
+                               description = "FALLBACK EXTRACTION:\n" + all_text[:500] + "..."
+                        except:
+                            pass
 
                     job = {
                         "keyword": search_query,
