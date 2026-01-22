@@ -165,26 +165,54 @@ def scrape_naukri_jobs(query, location=None):
                 # Check for Next Button
                 # Selector: a.mw-25.btn-next usually.
                 # Use a specific selector to avoid matching random text.
+                # Check for Next Button
+                print("Checking for next button...")
+                
+                # Close potential privacy banner first
+                try: 
+                    blocker = page.query_selector("button:has-text('Got it')")
+                    if blocker and blocker.is_visible():
+                        blocker.click()
+                        time.sleep(0.5)
+                except: pass
+
+                # Robust selector for Next button: 
+                # 1. Contains text "Next"
+                # 2. Is an 'a' tag (usually) or button
+                # 3. Not disabled
                 try:
-                    next_btn = page.query_selector("a.mw-25.btn-next")
+                    # Generic text match is safest because class names like 'styles_btn-secondary__2AsIP' change often.
+                    # We check visible 'Next' buttons.
+                    next_btn = page.query_selector("a:has-text('Next')") or page.query_selector("button:has-text('Next')")
                     
                     if next_btn and next_btn.is_visible():
-                        # Check if disabled (common pattern is class 'disabled')
+                        # Check disabled state
+                        # Naukri uses 'disabled' attribute or class
+                        is_disabled = next_btn.get_attribute("disabled") is not None
                         classes = next_btn.get_attribute("class") or ""
-                        if "disabled" in classes.lower():
+                        
+                        if is_disabled or "disabled" in classes.lower() or "previous" in classes.lower():
+                            # If we matched 'Next' text but it's actually disabled or weirdly the previous button (unlikely with has-text Next)
                             print("Next button found but disabled. Optimization loop finished.")
                             break
                         
                         print("Navigating to next page...")
-                        # Use JS click to avoid interception by sticky headers/footers
+                        
+                        # Scroll into view with margin to avoid sticky header
+                        next_btn.scroll_into_view_if_needed()
+                        page.evaluate("window.scrollBy(0, -100)") # Scroll up a bit so it's not under header/footer
+                        time.sleep(1)
+                        
+                        # Force click with JS to bypass overlays
                         next_btn.evaluate("e => e.click()")
                         
-                        time.sleep(3) # Wait for page load
+                        time.sleep(5) # Wait for potential SPA transition or reload
                         page_num += 1
                         page.wait_for_load_state("domcontentloaded")
                     else:
                         print("No next button found. Optimization loop finished.")
                         break
+                        
                 except Exception as e:
                      print(f"Pagination error: {e}")
                      break
