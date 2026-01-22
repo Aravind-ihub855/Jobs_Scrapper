@@ -149,6 +149,87 @@ def scrape_adzuna_jobs(search_query: str, location: str = None):
                      with open(f"debug_adzuna_fallback_{ts}.html", "w", encoding="utf-8") as f:
                          f.write(page.content())
 
+            if jobs:
+                print(f"Scraping details for {len(jobs)} jobs...")
+                for job in jobs:
+                    try:
+                        url = job["job_url"]
+                        if url and "adzuna" in url and url != "N/A":
+                            print(f"Scraping details: {url}")
+                            page.goto(url, timeout=30000)
+                            
+                            # Wait for content
+                            # Wait for content
+                            page.wait_for_selector("body")
+
+                            # Handle "Email Alert" popup (Apply Capture)
+                            try:
+                                 # Look for the "No thanks" link with a short timeout
+                                 no_thanks = page.wait_for_selector("a[data-js='apply-capture-skip']", state="visible", timeout=3000)
+                                 if no_thanks:
+                                     print("Closing email alert popup...")
+                                     no_thanks.click()
+                                     # Wait for it to disappear/animate
+                                     page.wait_for_timeout(1000)
+                            except:
+                                 # It's fine if the popup doesn't appear
+                                 pass
+                            
+                            # Extract logic
+                            # 1. Full Description
+                            # Per source, it's in <section class="adp-body ...">
+                            description_sel = page.query_selector(".adp-body")
+                            if description_sel:
+                                full_desc = description_sel.inner_text().strip()
+                                if len(full_desc) > len(job["job_description"]):
+                                    job["job_description"] = full_desc
+                            
+                            # 2. Extract Data from JS Variable (Cleanest source for Salary/Location/Company)
+                            # window.job_desc_modal_details = { title, salary, location, company }
+                            try:
+                                js_details = page.evaluate("() => window.job_desc_modal_details")
+                                if js_details:
+                                    if "salary" in js_details and js_details["salary"]:
+                                         job["salary"] = js_details["salary"]
+                                    if "company" in js_details and js_details["company"]:
+                                         job["company"] = js_details["company"]
+                                    if "location" in js_details and js_details["location"]:
+                                         job["location"] = js_details["location"]
+                            except Exception as e:
+                                print(f"JS extraction error: {e}")
+
+                            # 3. Contract Type / Hours / Job Type
+                            # Per source: .ui-contract-type, .ui-contract-time
+                            types = []
+                            
+                            ctype = page.query_selector(".ui-contract-type")
+                            if ctype:
+                                types.append(ctype.inner_text().strip())
+                            
+                            ctime = page.query_selector(".ui-contract-time")
+                            if ctime:
+                                types.append(ctime.inner_text().strip())
+                                
+                            # Fallback to stats table if needed
+                            stats_sels = page.query_selector_all("table[class*='stats'] tr, .ui-pill")
+                            for sel in stats_sels:
+                                txt = sel.inner_text().strip()
+                                if txt and txt not in types:
+                                    types.append(txt)
+
+                            if types:
+                                 # Filter common keywords
+                                 keywords = ["Contract", "Permanent", "Full time", "Part time", "Internship"]
+                                 valid_types = [t for t in types if any(k.lower() in t.lower() for k in keywords)]
+                                 if valid_types:
+                                     job["job_type"] = ", ".join(valid_types)
+                            
+                            # Small sleep to be polite
+                            page.wait_for_timeout(1000)
+    
+                    except Exception as e:
+                        print(f"Error scraping details for {job.get('title')}: {e}")
+
         except Exception as e:
             print(f"Error scraping Adzuna: {e}")
         finally:

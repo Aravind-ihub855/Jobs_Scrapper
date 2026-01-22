@@ -12,3 +12,4 @@ db = client[DB_NAME]
 
 simplyhired_collection = db["simplyhired_jobs"]
 adzuna_collection = db["adzuna_jobs"]
+whatjobs_collection = db["whatjobs_jobs"]
