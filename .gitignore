@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+*.manifest
+*.spec
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+.env/
+
+# Environment variables
+*.env
+
+# Logs
+*.log
+logs/
+*.out
+*.err
+
+# IDE / Editor settings
+.vscode/
+.idea/
+*.swp
+*~
+
+# Testing / Coverage
+.coverage
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+
+# Build / Distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+*.whl
+
+# FastAPI specific (if using uvicorn reload)
+*.pid
+
+# Mypy / Type checker
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pydantic / Cache
+.pdm-cache/
