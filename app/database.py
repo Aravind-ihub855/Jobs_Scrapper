@@ -10,5 +10,5 @@ DB_NAME = os.getenv("DB_NAME")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[DB_NAME]
 
-simplyhired_collection = db["simplyhiredjobs"]
+simplyhired_collection = db["simplyhired_jobs"]
 adzuna_collection = db["adzuna_jobs"]

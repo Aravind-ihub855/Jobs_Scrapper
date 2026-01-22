@@ -16,6 +16,10 @@ async def scrape_simplyhired(
 
     if jobs:
         await simplyhired_collection.insert_many(jobs)
+        # Convert ObjectId to string for JSON serialization
+        for job in jobs:
+            if "_id" in job:
+                job["_id"] = str(job["_id"])
 
     return {
         "query": query,
@@ -31,6 +35,13 @@ async def scrape_adzuna(
 ):
     # Run the synchronous blocking scraper in a threadpool
     jobs = await asyncio.to_thread(scrape_adzuna_jobs, query, location)
+    
+    if jobs:
+        await adzuna_collection.insert_many(jobs)
+        # Convert ObjectId to string for JSON serialization
+        for job in jobs:
+            if "_id" in job:
+                job["_id"] = str(job["_id"])
 
     return {
         "query": query,
