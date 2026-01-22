@@ -78,9 +78,10 @@ async def scrape_monster(
 @app.get("/scrape/ziprecruiter")
 async def scrape_ziprecruiter(
     query: str = Query(..., example="React Developer"),
-    location: Optional[str] = Query(None, example="India")
+    location: Optional[str] = Query(None, example="India"),
+    max_pages: int = Query(1, example=1, description="Number of pages to scrape")
 ):
-    jobs = await asyncio.to_thread(scrape_ziprecruiter_jobs, query, location)
+    jobs = await asyncio.to_thread(scrape_ziprecruiter_jobs, query, location, max_pages)
 
     if jobs:
         await ziprecruiter_collection.insert_many(jobs)
