@@ -1,4 +1,4 @@
-
+import sys
 from fastapi import FastAPI, Query
 from typing import Optional
 from app.simplyhired import scrape_simplyhired_jobs
@@ -13,6 +13,10 @@ import asyncio
 from concurrent.futures import ProcessPoolExecutor
 
 app = FastAPI(title="Job Scraper API")
+
+# Fix for Playwright subprocesses on Windows
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 executor = ProcessPoolExecutor(max_workers=2)
 
