@@ -65,15 +65,45 @@ class ZipRecruiterScraper:
                     # Slight delay for dynamic content
                     time.sleep(2)
 
-                    # Extract jobs
-                    new_jobs = self._extract_jobs(page)
+                    # Extract job URLs from the search page first
+                    print(f"   Analysing job cards on page {page_num}...") 
+                    job_links = self._get_job_links(page)
                     
-                    if new_jobs == 0:
-                        print("   ⚠️  No jobs found on this page. Stopping.")
-                        break
+                    if not job_links:
+                        print("   ⚠️  No job links found on this search page.")
+                        if page_num == 1: break # If first page fails, stop
                     
-                    # Check for next page button to decide if we continue
-                    # Selector for next page: ul.pagination li a[rel='next'] or similar
+                    print(f"   Found {len(job_links)} jobs to scrape details for.")
+                    
+                    # Visit each job URL to get full details
+                    for idx, link in enumerate(job_links, 1):
+                        print(f"      [{idx}/{len(job_links)}] Visiting: {link}...")
+                        try:
+                            # Open new page for job details to keep search results intact
+                            detail_page = context.new_page()
+                            detail_page.goto(link, timeout=45000, wait_until="domcontentloaded")
+                            
+                            # Add random delay
+                            time.sleep(random.uniform(1.5, 3))
+                            
+                            # Scrape full details
+                            job_data = self._scrape_job_details(detail_page, link)
+                            
+                            if job_data:
+                                self.jobs_data.append(job_data)
+                                print(f"      ✓ Scraped: {job_data['title'][:40]}...")
+                            
+                            detail_page.close()
+                            
+                            # Random delay between jobs
+                            time.sleep(random.uniform(1, 2))
+                            
+                        except Exception as e:
+                            print(f"      ❌ Failed to scrape job {link}: {e}")
+                            try: detail_page.close() 
+                            except: pass
+
+                    # Check for next page button on the Main Search Page to decide if we continue
                     has_next = page.query_selector("ul.pagination a[rel='next']") or \
                                page.query_selector("li.active + li a")
                                
@@ -82,98 +112,107 @@ class ZipRecruiterScraper:
                         break
                         
                     time.sleep(random.uniform(2, 4))
-                
+            
             except Exception as e:
                 print(f"❌ Error during scraping: {e}")
             finally:
                 browser.close()
 
-    def _extract_jobs(self, page):
-        """Extract jobs from the current HTML page"""
-        jobs_found_count = 0
-        
-        # Select all job list items
-        # Based on source: <li class="job-listing ...">
-        job_cards = page.query_selector_all("li.job-listing")
-        
-        print(f"   Found {len(job_cards)} job cards.")
-
-        for card in job_cards:
-            try:
-                job = {}
-                
-                # 1. Title and URL
-                # Selector: .jobList-title (which is an anchor tag)
-                title_elem = card.query_selector(".jobList-title")
-                if title_elem:
-                    job['title'] = title_elem.inner_text().strip()
-                    href = title_elem.get_attribute("href")
-                    if href:
-                        if href.startswith("http"):
-                            job['url'] = href
-                        else:
-                            job['url'] = "https://www.ziprecruiter.in" + href
+    def _get_job_links(self, page):
+        """Extract all job URLs from the search results page"""
+        links = []
+        try:
+            # Selector derived from search page: .jobList-title (anchor)
+            elements = page.query_selector_all(".jobList-title")
+            for el in elements:
+                href = el.get_attribute("href")
+                if href:
+                    if href.startswith("http"):
+                        links.append(href)
                     else:
-                        job['url'] = "N/A"
-                else:
-                    job['title'] = "N/A"
-                    job['url'] = "N/A"
+                        links.append("https://www.ziprecruiter.in" + href)
+        except Exception as e:
+            print(f"   Error extracting links: {e}")
+        return links
 
-                # 2. Company & Location
-                # Selector: .jobList-introMeta
-                # It usually has <li><i>icon</i> Text</li>
-                meta_elem = card.query_selector(".jobList-introMeta")
-                job['company'] = "N/A"
-                job['location'] = "N/A"
+    def _scrape_job_details(self, page, url):
+        """Extract full details from the job detail page"""
+        job = {
+            "title": "N/A",
+            "company": "N/A",
+            "location": "N/A",
+            "description": "N/A",
+            "posted_date": "N/A",
+            "job_type": "N/A",
+            "salary": "N/A",
+            "url": url,
+            "qualifications": []
+        }
+        
+        try:
+            # 1. Title
+            # <h1 class="u-mv--remove u-textH2">
+            title_el = page.query_selector("h1.u-textH2") or page.query_selector("h1")
+            if title_el:
+                job['title'] = title_el.inner_text().strip()
+
+            # 2. Company
+            # <div class="text-primary text-large"><strong>Paresha HR Service PVT LTD</strong></div>
+            company_el = page.query_selector(".text-primary.text-large strong")
+            if company_el:
+                job['company'] = company_el.inner_text().strip()
+            
+            # 3. Location
+            # <span><i class="fas fa-map-marker-alt"></i><span class="u-ml--xsmall">Coimbatore, Tamil Nadu, IN</span></span>
+            # We look for the container with map marker
+            loc_el = page.query_selector(":has(.fa-map-marker-alt) > .u-ml--xsmall")
+            if loc_el:
+                job['location'] = loc_el.inner_text().strip()
+
+            # 4. Job Type (Full Time etc)
+            # <i class="fas fa-hourglass" ...></i><span class="u-ml--xsmall">Full Time</span>
+            type_el = page.query_selector(":has(.fa-hourglass) > .u-ml--xsmall")
+            if type_el:
+                job['job_type'] = type_el.inner_text().strip()
                 
-                if meta_elem:
-                    lis = meta_elem.query_selector_all("li")
-                    # Heuristic: Company often has fa-building, Location has fa-map-marker-alt
-                    for li in lis:
-                        text = li.inner_text().strip()
-                        if not text: continue
-                        
-                        icon_building = li.query_selector(".fa-building")
-                        icon_map = li.query_selector(".fa-map-marker-alt")
-                        
-                        if icon_building:
-                            job['company'] = text
-                        elif icon_map:
-                            job['location'] = text
-                        # Fallback by position if icons missing
-                        elif job['company'] == "N/A": 
-                             job['company'] = text # Assume first text is company
-                        elif job['location'] == "N/A" and text != job['company']:
-                             job['location'] = text
+            # 5. Posted Date
+            # <div class="text-muted"><span>Posted 16 January, 2026</span></div>
+            date_el = page.query_selector("div.text-muted span")
+            if date_el and "Posted" in date_el.inner_text():
+                job['posted_date'] = date_el.inner_text().replace("Posted", "").strip()
 
-                # 3. Description Snippet
-                # Selector: .jobList-description
-                desc_elem = card.query_selector(".jobList-description")
-                job['description'] = desc_elem.inner_text().strip() if desc_elem else "N/A"
-
-                # 4. Date
-                # Selector: .jobList-date
-                date_elem = card.query_selector(".jobList-date")
-                job['posted_date'] = date_elem.inner_text().strip() if date_elem else "N/A"
-
-                # Standard fields
-                job['salary'] = "N/A" # Not visible in snippet usually
-                job['job_type'] = "N/A"
-                job['qualifications'] = [] # Detailed extraction needed
-
-                # Add to list
-                if job['title'] != "N/A":
-                    # Deduplicate
-                    if not any(j['url'] == job['url'] for j in self.jobs_data):
-                        self.jobs_data.append(job)
-                        jobs_found_count += 1
-                        print(f"      + {job['title']} at {job['company']}")
-
-            except Exception as e:
-                print(f"      Error parsing card: {e}")
-                continue
+            # 6. Description
+            # <div class="job-body">...</div>
+            desc_el = page.query_selector(".job-body")
+            if desc_el:
+                # Get the full text, preserving some structure with newlines if possible
+                job['description'] = desc_el.inner_text().strip()
                 
-        return jobs_found_count
+                # Try to extract requirements/qualifications from the text roughly
+                if "Requirements:" in job['description']:
+                    try:
+                        parts = job['description'].split("Requirements:")
+                        if len(parts) > 1:
+                            req_block = parts[1].split("\n")
+                            # Take first few bullets
+                            job['qualifications'] = [line.strip("- •") for line in req_block[:5] if len(line.strip()) > 5]
+                    except:
+                        pass
+            
+            # 7. Apply URL (if external)
+            apply_btn = page.query_selector("a.external_apply")
+            if apply_btn:
+                ext_url = apply_btn.get_attribute("href")
+                if ext_url:
+                     # For API consistency, keep the ZR url as main, but maybe note this?
+                     # We'll just keep the detailed page URL as the job URL for now as it's stable.
+                     pass
+
+            return job
+            
+        except Exception as e:
+            print(f"      ⚠️  Partial error scraping details: {e}")
+            return job
 
 def scrape_ziprecruiter_jobs(query, location="India", max_pages=1):
     scraper = ZipRecruiterScraper(headless=False) # Keep False for safety/debugging as per user preference
