@@ -12,3 +12,5 @@ db = client[DB_NAME]
 
 simplyhired_collection = db["simplyhiredjobs"]
 adzuna_collection = db["adzuna_jobs"]
+monster_collection = db["monster_jobs"]
+ziprecruiter_collection = db["ziprecruiter_jobs"]

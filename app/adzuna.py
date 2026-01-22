@@ -91,9 +91,4 @@ def scrape_adzuna_jobs(search_query: str, location: str = None):
         finally:
             browser.close()
 
-    if jobs:
-        adzuna_collection.insert_many(jobs)
-        for job in jobs:
-            job["_id"] = str(job["_id"])
-    
     return jobs
