@@ -1,5 +1,6 @@
 
 from fastapi import FastAPI, Query
+from typing import Optional
 from app.simplyhired import scrape_simplyhired_jobs
 from app.adzuna import scrape_adzuna_jobs
 from app.whatjobs import scrape_whatjobs_jobs
