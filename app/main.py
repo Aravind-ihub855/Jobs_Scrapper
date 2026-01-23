@@ -8,7 +8,8 @@ from app.naukri import scrape_naukri_jobs
 from app.ziprecruiter import scrape_ziprecruiter_jobs
 from app.monster import scrape_monster_jobs
 from app.leetcode import scrape_leetcode_questions
-from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection
+from app.geeksforgeeks import scrape_gfg_questions
+from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection
 from motor.motor_asyncio import AsyncIOMotorCollection
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
@@ -176,6 +177,34 @@ async def scrape_leetcode(
 
     return {
         "query": query,
+        "total_questions_scraped": len(questions),
+        "status": "success",
+        "data": questions
+    }
+
+@app.get("/scrape/gfg")
+async def scrape_gfg(
+    query: str = Query(..., example="anagram"),
+    pages: int = Query(1, example=1, description="Number of pages to scrape")
+    ):
+    # Run the synchronous blocking scraper in a process pool
+    loop = asyncio.get_event_loop()
+    questions = await loop.run_in_executor(executor, scrape_gfg_questions, query, pages)
+    
+    if questions:
+        # Save to database in the main process
+        for q in questions:
+            await gfg_collection.update_one(
+                {"url": q["url"]},
+                {"$set": q},
+                upsert=True
+            )
+            if "_id" in q:
+                q["_id"] = str(q["_id"])
+
+    return {
+        "query": query,
+        "pages": pages,
         "total_questions_scraped": len(questions),
         "status": "success",
         "data": questions
