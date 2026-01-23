@@ -1,4 +1,4 @@
-
+import sys
 from fastapi import FastAPI, Query
 from typing import Optional
 from app.simplyhired import scrape_simplyhired_jobs
@@ -7,10 +7,15 @@ from app.whatjobs import scrape_whatjobs_jobs
 from app.naukri import scrape_naukri_jobs
 from app.ziprecruiter import scrape_ziprecruiter_jobs
 from app.monster import scrape_monster_jobs
-from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection
+from app.glassdoor import scrape_glassdoor_jobs
+from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, glassdoor_collection
 from motor.motor_asyncio import AsyncIOMotorCollection
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
+
+# Fix for Playwright subprocesses on Windows
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 app = FastAPI(title="Job Scraper API")
 
@@ -69,6 +74,7 @@ async def scrape_ziprecruiter(
     location: Optional[str] = Query(None, example="India"),
     max_pages: int = Query(1, example=1, description="Number of pages to scrape")
     ):
+    # Using to_thread instead of process pool to avoid Windows-specific child process errors
     jobs = await asyncio.to_thread(scrape_ziprecruiter_jobs, query, location, max_pages)
 
     if jobs:
@@ -141,6 +147,30 @@ async def scrape_naukri(
     
     if jobs:
         await naukri_collection.insert_many(jobs)
+        # Convert ObjectId to string for JSON serialization
+        for job in jobs:
+            if "_id" in job:
+                job["_id"] = str(job["_id"])
+
+    return {
+        "query": query,
+        "location": location,
+        "total_jobs_scraped": len(jobs),
+        "status": "success",
+        "data": jobs
+    }
+
+@app.get("/scrape/glassdoor")
+async def scrape_glassdoor(
+    query: str = Query(..., example="Software Engineer"),
+    location: str = Query("New York, NY", example="New York, NY"),
+    max_pages: int = Query(1, example=1)
+    ):
+    # Using to_thread instead of process pool for stability on Windows
+    jobs = await asyncio.to_thread(scrape_glassdoor_jobs, query, location, max_pages)
+
+    if jobs:
+        await glassdoor_collection.insert_many(jobs)
         # Convert ObjectId to string for JSON serialization
         for job in jobs:
             if "_id" in job:
