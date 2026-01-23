@@ -7,7 +7,8 @@ from app.whatjobs import scrape_whatjobs_jobs
 from app.naukri import scrape_naukri_jobs
 from app.ziprecruiter import scrape_ziprecruiter_jobs
 from app.monster import scrape_monster_jobs
-from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection
+from app.leetcode import scrape_leetcode_questions
+from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection
 from motor.motor_asyncio import AsyncIOMotorCollection
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
@@ -157,3 +158,26 @@ async def scrape_naukri(
         "status": "success",
         "data": jobs
     }
+
+@app.get("/scrape/leetcode")
+async def scrape_leetcode(
+    query: str = Query(..., example="iterator")
+    ):
+    # Run the synchronous blocking scraper in a process pool
+    loop = asyncio.get_event_loop()
+    questions = await loop.run_in_executor(executor, scrape_leetcode_questions, query)
+    
+    if questions:
+        await leetcode_collection.insert_many(questions)
+        # Convert ObjectId to string for JSON serialization
+        for q in questions:
+            if "_id" in q:
+                q["_id"] = str(q["_id"])
+
+    return {
+        "query": query,
+        "total_questions_scraped": len(questions),
+        "status": "success",
+        "data": questions
+    }
+
