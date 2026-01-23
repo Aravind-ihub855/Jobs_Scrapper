@@ -1,6 +1,6 @@
 import sys
 from fastapi import FastAPI, Query
-from typing import Optional
+from typing import Optional, List
 from app.simplyhired import scrape_simplyhired_jobs
 from app.adzuna import scrape_adzuna_jobs
 from app.whatjobs import scrape_whatjobs_jobs
@@ -10,7 +10,8 @@ from app.monster import scrape_monster_jobs
 from app.leetcode import scrape_leetcode_questions
 from app.geeksforgeeks import scrape_gfg_questions
 from app.exercism import scrape_exercism_questions
-from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection, exercism_collection
+from app.hackerrank import scrape_hackerrank_questions
+from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection, exercism_collection, hackerrank_collection
 from motor.motor_asyncio import AsyncIOMotorCollection
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
@@ -239,5 +240,43 @@ async def scrape_exercism(
         "total_exercises_scraped": len(exercises),
         "status": "success",
         "data": exercises
+    }
+
+@app.get("/scrape/hackerrank")
+async def scrape_hackerrank(
+    track: str = Query("python", description="Track slug (e.g., python, algorithms)"),
+    subdomains: List[str] = Query(..., description="Filter by subdomains (e.g., py-introduction)"),
+    status: Optional[List[str]] = Query(None, description="Filter by status (e.g., solved, unsolved)"),
+    difficulty: Optional[List[str]] = Query(None, description="Filter by difficulty (e.g., easy, medium)"),
+    skills: Optional[List[str]] = Query(None, description="Filter by skills"),
+    pages: int = Query(1, ge=1)
+):
+    loop = asyncio.get_event_loop()
+    questions = await loop.run_in_executor(
+        executor, 
+        scrape_hackerrank_questions, 
+        track, subdomains, status, difficulty, skills, pages
+    )
+    
+    if questions:
+        for q in questions:
+            await hackerrank_collection.update_one(
+                {"slug": q["slug"]},
+                {"$set": q},
+                upsert=True
+            )
+            if "_id" in q:
+                q["_id"] = str(q["_id"])
+                
+    return {
+        "track": track,
+        "filters": {
+            "status": status,
+            "difficulty": difficulty,
+            "subdomains": subdomains,
+            "skills": skills
+        },
+        "count": len(questions),
+        "data": questions
     }
 
