@@ -185,12 +185,13 @@ async def scrape_leetcode(
 
 @app.get("/scrape/gfg")
 async def scrape_gfg(
-    query: str = Query(..., example="anagram"),
-    pages: int = Query(1, example=1, description="Number of pages to scrape")
+    query: Optional[str] = Query(None, example="anagram"),
+    pages: int = Query(1, example=1, description="Number of pages to scrape"),
+    company: Optional[str] = Query(None, example="Infosys")
     ):
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
-    questions = await loop.run_in_executor(executor, scrape_gfg_questions, query, pages)
+    questions = await loop.run_in_executor(executor, scrape_gfg_questions, query, pages, company)
     
     if questions:
         # Save to database in the main process
@@ -205,6 +206,7 @@ async def scrape_gfg(
 
     return {
         "query": query,
+        "company": company,
         "pages": pages,
         "total_questions_scraped": len(questions),
         "status": "success",

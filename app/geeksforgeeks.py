@@ -115,7 +115,7 @@ def parse_problem_content(raw_text: str) -> dict:
 
     return sections
 
-def scrape_gfg_questions(search_query: str, pages: int = 1):
+def scrape_gfg_questions(search_query: str, pages: int = 1, company: str = None):
     """
     Scrapes GeeksforGeeks questions using the internal Practice API for list data
     and Playwright for detail extraction.
@@ -133,7 +133,14 @@ def scrape_gfg_questions(search_query: str, pages: int = 1):
         for i in range(1, pages + 1):
             # Use the practice API instead of HTML scraping
             # This is much more reliable as it gives us the exact slugs
-            api_url = f"https://practiceapi.geeksforgeeks.org/api/vr/problems/?pageMode=explore&page={i}&category={search_query}&sortBy=submissions"
+            api_url = f"https://practiceapi.geeksforgeeks.org/api/vr/problems/?pageMode=explore&page={i}&sortBy=submissions"
+            
+            if search_query:
+                api_url += f"&category={search_query}"
+            
+            if company:
+                api_url += f"&company={company}"
+            
             print(f"[GFG List] Fetching GFG list from API: {api_url}")
             
             try:
@@ -160,8 +167,8 @@ def scrape_gfg_questions(search_query: str, pages: int = 1):
                 problems = json_data.get("results", [])
                 print(f"[GFG List] Received {len(problems)} problems from API on page {i}")
                 
-                if not problems:
-                    # Fallback to search if category returns nothing
+                if not problems and not company:
+                    # Fallback to search if category returns nothing (skip if company is set as it's a specific filter)
                     api_url = f"https://practiceapi.geeksforgeeks.org/api/vr/problems/?pageMode=explore&page={i}&search={search_query}&sortBy=submissions"
                     page.goto(api_url, wait_until="networkidle", timeout=60000)
                     json_data = page.evaluate("() => JSON.parse(document.body.innerText)")
@@ -184,7 +191,8 @@ def scrape_gfg_questions(search_query: str, pages: int = 1):
                         "submissions": clean_text(str(prob.get("total_submissions", ""))),
                         "accuracy": clean_text(str(prob.get("accuracy", ""))),
                         "platform": "GeeksforGeeks",
-                        "search_query": search_query
+                        "search_query": search_query,
+                        "company": company
                     })
             except Exception as e:
                 print(f"[GFG List] Error fetching GFG list page {i}: {e}")
