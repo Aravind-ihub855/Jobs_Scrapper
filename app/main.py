@@ -9,7 +9,8 @@ from app.ziprecruiter import scrape_ziprecruiter_jobs
 from app.monster import scrape_monster_jobs
 from app.leetcode import scrape_leetcode_questions
 from app.geeksforgeeks import scrape_gfg_questions
-from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection
+from app.exercism import scrape_exercism_questions
+from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection, exercism_collection
 from motor.motor_asyncio import AsyncIOMotorCollection
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
@@ -208,5 +209,33 @@ async def scrape_gfg(
         "total_questions_scraped": len(questions),
         "status": "success",
         "data": questions
+    }
+
+@app.get("/scrape/exercism")
+async def scrape_exercism(
+    language: str = Query(..., example="python"),
+    pages: int = Query(1, example=1, description="Number of pages to scrape")
+    ):
+    # Run the synchronous blocking scraper in a process pool
+    loop = asyncio.get_event_loop()
+    exercises = await loop.run_in_executor(executor, scrape_exercism_questions, language, pages)
+    
+    if exercises:
+        # Save to database in the main process
+        for ex in exercises:
+            await exercism_collection.update_one(
+                {"url": ex["url"]},
+                {"$set": ex},
+                upsert=True
+            )
+            if "_id" in ex:
+                ex["_id"] = str(ex["_id"])
+
+    return {
+        "language": language,
+        "pages": pages,
+        "total_exercises_scraped": len(exercises),
+        "status": "success",
+        "data": exercises
     }
 
