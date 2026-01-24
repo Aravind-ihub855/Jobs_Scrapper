@@ -11,7 +11,8 @@ from app.leetcode import scrape_leetcode_questions
 from app.geeksforgeeks import scrape_gfg_questions
 from app.exercism import scrape_exercism_questions
 from app.hackerrank import scrape_hackerrank_questions
-from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection, exercism_collection, hackerrank_collection
+from app.codechef import scrape_codechef_questions
+from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection, exercism_collection, hackerrank_collection,codechef_collection
 from motor.motor_asyncio import AsyncIOMotorCollection
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
@@ -277,6 +278,35 @@ async def scrape_hackerrank(
             "skills": skills
         },
         "count": len(questions),
+        "data": questions
+    }
+
+
+
+@app.get("/scrape/codechef")
+async def scrape_codechef(
+    tag: str = Query(..., example="permutation-cycles"),
+    pages: int = Query(1, example=1)
+    ):
+    # Run the synchronous blocking scraper in a process pool
+    loop = asyncio.get_event_loop()
+    questions = await loop.run_in_executor(executor, scrape_codechef_questions, tag, pages)
+    
+    if questions:
+        for q in questions:
+            await codechef_collection.update_one(
+                {"url": q["url"]},
+                {"$set": q},
+                upsert=True
+            )
+            if "_id" in q:
+                q["_id"] = str(q["_id"])
+                
+    return {
+        "tag": tag,
+        "pages": pages,
+        "total_questions_scraped": len(questions),
+        "status": "success",
         "data": questions
     }
 
