@@ -30,7 +30,7 @@ def scrape_adzuna_jobs(search_query: str, location: str = None):
             page_number = 1
 
             # ============================
-            # 🔁 PAGINATION LOOP (NEW)
+            # PAGINATION LOOP 
             # ============================
             while True:
                 paginated_url = url if page_number == 1 else f"{url}&p={page_number}"
@@ -47,11 +47,11 @@ def scrape_adzuna_jobs(search_query: str, location: str = None):
                     pass
 
                 # ============================
-                # ✅ JSON EXTRACTION PATH
+                # JSON EXTRACTION PATH
                 # ============================
                 if data and "results" in data and len(data["results"]) > 0:
                     results = data["results"]
-                    print(f"✅ Found {len(results)} jobs on page {page_number}")
+                    print(f"Found {len(results)} jobs on page {page_number}")
 
                     for item in results:
                         try:
@@ -96,20 +96,20 @@ def scrape_adzuna_jobs(search_query: str, location: str = None):
                             })
 
                         except Exception as e:
-                            print(f"❌ Error parsing JSON job: {e}")
+                            print(f"Error parsing JSON job: {e}")
 
                 # ============================
                 # 🔁 DOM FALLBACK (UNCHANGED)
                 # ============================
                 else:
-                    print("⚠️ No az_wj_data found. Falling back to DOM scraping.")
+                    print("No az_wj_data found. Falling back to DOM scraping.")
 
                     try:
                         page.wait_for_selector("article[data-aid]", timeout=10000)
                         job_cards = page.query_selector_all("article[data-aid]")
 
                         if not job_cards:
-                            print("⛔ No DOM jobs found. Ending pagination.")
+                            print("No DOM jobs found. Ending pagination.")
                             break
 
                         for card in job_cards:
@@ -141,19 +141,19 @@ def scrape_adzuna_jobs(search_query: str, location: str = None):
                                 })
 
                             except Exception as e:
-                                print(f"❌ Error parsing DOM card: {e}")
+                                print(f"Error parsing DOM card: {e}")
 
                     except Exception as e:
-                        print(f"❌ DOM fallback failed: {e}")
+                        print(f"DOM fallback failed: {e}")
                         break
 
                 page_number += 1
                 page.wait_for_timeout(1500)
 
             # ============================
-            # 🔍 JOB DETAIL ENRICHMENT (UNCHANGED)
+            # JOB DETAIL ENRICHMENT 
             # ============================
-            print(f"\n🧠 Enriching {len(jobs)} jobs with detail pages...")
+            print(f"\nEnriching {len(jobs)} jobs with detail pages...")
 
             for job in jobs:
                 try:
@@ -161,7 +161,7 @@ def scrape_adzuna_jobs(search_query: str, location: str = None):
                     if not url or "adzuna" not in url:
                         continue
 
-                    print(f"➡️ Visiting job detail: {url}")
+                    print(f"Visiting job detail: {url}")
                     page.goto(url, timeout=30000)
                     page.wait_for_selector("body")
 
@@ -219,7 +219,7 @@ def scrape_adzuna_jobs(search_query: str, location: str = None):
                     page.wait_for_timeout(1000)
 
                 except Exception as e:
-                    print(f"❌ Error enriching job: {e}")
+                    print(f"Error enriching job: {e}")
 
         finally:
             browser.close()

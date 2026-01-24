@@ -17,7 +17,7 @@ class ZipRecruiterScraper:
         Search for jobs on ZipRecruiter India
         """
         print(f"\n{'='*70}")
-        print(f"🔍 ZIPRECRUITER INDIA JOB SCRAPER")
+        print(f"ZIPRECRUITER INDIA JOB SCRAPER")
         print(f"{'='*70}")
         print(f"Search: {keywords}")
         print(f"Location: {location}")
@@ -43,7 +43,7 @@ class ZipRecruiterScraper:
                 # Base search URL
                 url = f"{self.base_url}?q={q}&l={l}"
                 
-                print(f"🌐 Base URL: {url}")
+                print(f"Base URL: {url}")
 
                 for page_num in range(1, max_pages + 1):
                     # Add pagination if needed
@@ -51,7 +51,7 @@ class ZipRecruiterScraper:
                     if page_num > 1:
                         current_url = f"{url}&page={page_num}"
                     
-                    print(f"\n📄 Scraping page {page_num}...")
+                    print(f"\nScraping page {page_num}...")
                     print(f"   Link: {current_url}")
                     
                     try:
@@ -59,21 +59,21 @@ class ZipRecruiterScraper:
                         # Wait for job listings container
                         page.wait_for_selector("ul.jobList, li.job-listing", timeout=10000)
                     except Exception as e:
-                        print(f"   ⚠️  Error loading page {page_num}: {e}")
+                        print(f"Error loading page {page_num}: {e}")
                         break
 
                     # Slight delay for dynamic content
                     time.sleep(2)
 
                     # Extract job URLs from the search page first
-                    print(f"   Analysing job cards on page {page_num}...") 
+                    print(f"Analysing job cards on page {page_num}...") 
                     job_links = self._get_job_links(page)
                     
                     if not job_links:
-                        print("   ⚠️  No job links found on this search page.")
+                        print("No job links found on this search page.")
                         if page_num == 1: break # If first page fails, stop
                     
-                    print(f"   Found {len(job_links)} jobs to scrape details for.")
+                    print(f"Found {len(job_links)} jobs to scrape details for.")
                     
                     # Visit each job URL to get full details
                     for idx, link in enumerate(job_links, 1):
@@ -99,7 +99,7 @@ class ZipRecruiterScraper:
                             time.sleep(random.uniform(1, 2))
                             
                         except Exception as e:
-                            print(f"      ❌ Failed to scrape job {link}: {e}")
+                            print(f"Failed to scrape job {link}: {e}")
                             try: detail_page.close() 
                             except: pass
 
@@ -108,13 +108,13 @@ class ZipRecruiterScraper:
                                page.query_selector("li.active + li a")
                                
                     if not has_next and page_num < max_pages:
-                        print("   ℹ️  No next page link found. Finishing.")
+                        print("No next page link found. Finishing.")
                         break
                         
                     time.sleep(random.uniform(2, 4))
             
             except Exception as e:
-                print(f"❌ Error during scraping: {e}")
+                print(f"Error during scraping: {e}")
             finally:
                 browser.close()
 
@@ -211,7 +211,7 @@ class ZipRecruiterScraper:
             return job
             
         except Exception as e:
-            print(f"      ⚠️  Partial error scraping details: {e}")
+            print(f"Partial error scraping details: {e}")
             return job
 
 def scrape_ziprecruiter_jobs(query, location="India", max_pages=1):

@@ -25,7 +25,7 @@ class MonsterScraper:
         """
         Initialize the scraper with Playwright and stealth settings
         """
-        print("🚀 Initializing Playwright browser...")
+        print("Initializing Playwright browser...")
         
         try:
             self.playwright = sync_playwright().start()
@@ -48,7 +48,7 @@ class MonsterScraper:
             print("✓ Playwright browser initialized")
             
         except Exception as e:
-            print(f"\n❌ ERROR initializing Playwright: {e}")
+            print(f"\nERROR initializing Playwright: {e}")
             if hasattr(self, 'playwright'):
                 self.playwright.stop()
             sys.exit(1)
@@ -61,7 +61,7 @@ class MonsterScraper:
         content = self.page.content()
         
         if "captcha" in url or "geo.captcha-delivery.com" in content:
-             print("\n🛑 CAPTCHA DETECTED! (DataDome)")
+             print("\nCAPTCHA DETECTED! (DataDome)")
              print("Please solve the CAPTCHA in the browser window.")
              print("Waiting for you to finish...")
              
@@ -69,7 +69,7 @@ class MonsterScraper:
              while "captcha" in self.page.url.lower() or "geo.captcha-delivery.com" in self.page.content():
                  time.sleep(2)
              
-             print("✅ CAPTCHA solved! Proceeding...")
+             print("CAPTCHA solved! Proceeding...")
              time.sleep(2)
              return True
         return False
@@ -84,7 +84,7 @@ class MonsterScraper:
             where = location.replace(' ', '-')
             url = f"{base_url}?q={q}&where={where}"
             
-            print(f"\n🔍 Searching Monster.com: {keywords} in {location}")
+            print(f"\nSearching Monster.com: {keywords} in {location}")
             
             self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(5)
@@ -92,10 +92,10 @@ class MonsterScraper:
             for page_num in range(1, max_pages + 1):
                 self.check_for_captcha()
                 
-                print(f"📄 Processing page {page_num}...")
+                print(f"Processing page {page_num}...")
                 
                 # Human-like scroll
-                print("   📜 Scrolling to load jobs...")
+                print("Scrolling to load jobs...")
                 for _ in range(3):
                     scroll_amount = random.randint(600, 900)
                     self.page.evaluate(f"window.scrollBy(0, {scroll_amount});")
@@ -109,11 +109,11 @@ class MonsterScraper:
                     if self.check_for_captcha():
                         jobs_found = self._extract_jobs()
                 
-                print(f"   📊 Found {jobs_found} new jobs on this page")
+                print(f"Found {jobs_found} new jobs on this page")
                 
                 # Attempt to go to the next page
                 if page_num < max_pages:
-                    print("   ➡️ Looking for next page...")
+                    print("Looking for next page...")
                     if self._has_next_page():
                         try:
                             # Try multiple selectors for the next button
@@ -133,20 +133,20 @@ class MonsterScraper:
                                     break
                             
                             if clicked:
-                                print("   ✅ Clicked next page button.")
+                                print("Clicked next page button.")
                                 time.sleep(random.uniform(3, 5)) # Wait for next page to load
                             else:
-                                print("   ⚠️ Next button found but not clickable.")
+                                print("Next button found but not clickable.")
                                 break
                         except Exception as e:
-                            print(f"   ⚠️ Could not click next page button: {e}")
+                            print(f"Could not click next page button: {e}")
                             break # Exit loop if next button not found or clickable
                     else:
-                        print("   🔚 No more pages found.")
+                        print("No more pages found.")
                         break
                 
         except Exception as e:
-            print(f"      ⚠️  Search warning: {e}")
+            print(f"Search warning: {e}")
     
     def _extract_jobs(self):
         """Extract job information from the current page"""
@@ -179,7 +179,7 @@ class MonsterScraper:
             
             # If no jobs found with CSS, try to get all divs and filter
             if len(job_cards) < 3:
-                print("      ⚠️  Primary selectors failed, trying alternative approach...")
+                print("Primary selectors failed, trying alternative approach...")
                 all_divs = self.page.query_selector_all("div")
                 job_cards = []
                 for div in all_divs:
@@ -190,13 +190,13 @@ class MonsterScraper:
                     except:
                         continue
             
-            print(f"      📌 Found {len(job_cards)} potential job cards")
+            print(f"Found {len(job_cards)} potential job cards")
             
             if len(job_cards) == 0:
-                print("      ⚠️  No job cards found. Saving page for debugging...")
+                print("No job cards found. Saving page for debugging...")
                 with open("monster_debug.html", "w", encoding="utf-8") as f:
                     f.write(self.page.content())
-                print("      💾 Page saved as monster_debug.html")
+                print("Page saved as monster_debug.html")
                 return 0
             
             # Parse each job card
@@ -215,7 +215,7 @@ class MonsterScraper:
             return jobs_found
                     
         except Exception as e:
-            print(f"      ❌ Error extracting jobs: {e}")
+            print(f"Error extracting jobs: {e}")
             return 0
     
     def _parse_job_card(self, card):
@@ -393,8 +393,8 @@ if __name__ == "__main__":
     jobs = scrape_monster_jobs(job_role, job_location)
     
     if jobs:
-        print(f"\n✅ Scraped {len(jobs)} jobs successfully!")
+        print(f"\nScraped {len(jobs)} jobs successfully!")
         for j in jobs[:3]:
             print(f"- {j['title']} at {j['company']}")
     else:
-        print("\n❌ No jobs found.")
+        print("\nNo jobs found.")
