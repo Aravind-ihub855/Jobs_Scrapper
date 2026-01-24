@@ -12,7 +12,8 @@ from app.geeksforgeeks import scrape_gfg_questions
 from app.exercism import scrape_exercism_questions
 from app.hackerrank import scrape_hackerrank_questions
 from app.codechef import scrape_codechef_questions
-from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection, exercism_collection, hackerrank_collection,codechef_collection
+from app.prepinsta import scrape_prepinsta_questions
+from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection, exercism_collection, hackerrank_collection,codechef_collection,prepinsta_collection
 from motor.motor_asyncio import AsyncIOMotorCollection
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
@@ -305,6 +306,34 @@ async def scrape_codechef(
     return {
         "tag": tag,
         "pages": pages,
+        "total_questions_scraped": len(questions),
+        "status": "success",
+        "data": questions
+    }
+
+
+
+@app.get("/scrape/prepinsta")
+async def scrape_prepinsta(
+    company: str = Query("capgemini", example="capgemini")
+    ):
+    # Run the synchronous blocking scraper in a process pool
+    loop = asyncio.get_event_loop()
+    questions = await loop.run_in_executor(executor, scrape_prepinsta_questions, company)
+    
+    if questions:
+        for q in questions:
+            # Upsert based on title since URL is same for page
+            await prepinsta_collection.update_one(
+                {"title": q["title"], "company": q["company"]},
+                {"$set": q},
+                upsert=True
+            )
+            if "_id" in q:
+                q["_id"] = str(q["_id"])
+                
+    return {
+        "company": company,
         "total_questions_scraped": len(questions),
         "status": "success",
         "data": questions
