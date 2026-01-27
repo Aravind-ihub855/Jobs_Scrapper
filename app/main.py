@@ -144,14 +144,31 @@ async def scrape_whatjobs(
 @app.get("/scrape/naukri")
 async def scrape_naukri(
     query: str = Query(..., example="Data Engineer Intern"),
-    location: str = Query(None, example="Bengaluru")
+    location: str = Query(None, example="Bengaluru"),
+    pages: int = Query(5, example=5, description="Number of pages to scrape")
     ):
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
-    jobs = await loop.run_in_executor(executor, scrape_naukri_jobs, query, location)
+    # Pass pages to the scraper
+    jobs = await loop.run_in_executor(executor, scrape_naukri_jobs, query, location, pages)
     
+    saved_count = 0
     if jobs:
-        await naukri_collection.insert_many(jobs)
+        # Use upsert to avoid duplicates based on job_url
+        for job in jobs:
+            if "job_url" in job and job["job_url"]:
+                result = await naukri_collection.update_one(
+                    {"job_url": job["job_url"]},
+                    {"$set": job},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                # If no URL, just insert (less ideal but safe)
+                await naukri_collection.insert_one(job)
+                saved_count += 1
+
         # Convert ObjectId to string for JSON serialization
         for job in jobs:
             if "_id" in job:
@@ -161,6 +178,7 @@ async def scrape_naukri(
         "query": query,
         "location": location,
         "total_jobs_scraped": len(jobs),
+        "new_or_updated_jobs": saved_count,
         "status": "success",
         "data": jobs
     }

@@ -3,7 +3,7 @@ import time
 import random
 import re
 
-def scrape_naukri_jobs(query, location=None):
+def scrape_naukri_jobs(query, location=None, max_pages=10):
     extracted_jobs = []
     
     # Construct URL
@@ -45,7 +45,7 @@ def scrape_naukri_jobs(query, location=None):
 
             # Pagination Loop
             page_num = 1
-            max_pages = 2 # Reduced for testing speed
+            # max_pages is now a parameter
             
             while page_num <= max_pages:
                 print(f"Scraping Search Page {page_num}...")
@@ -113,31 +113,130 @@ def scrape_naukri_jobs(query, location=None):
                             
                         # Experience
                         experience = "N/A"
-                        # class contains 'exp'
-                        exp_el = job_page.query_selector("[class*='exp'] span") or \
-                                 job_page.query_selector("[class*='exp']") or \
-                                 job_page.query_selector(".exp")
-                        if exp_el:
-                            experience = exp_el.inner_text().strip()
+                        # Try specific icon-based selector first (from screenshot)
+                        # Structure: div.styles_jhc__exp__k_giM > i.ni-icon-bag + span
+                        try:
+                            exp_icon = job_page.query_selector("i.ni-icon-bag")
+                            if exp_icon:
+                                # siblings or parent's text
+                                # The span is a sibling/in same parent
+                                exp_parent = exp_icon.xpath("..")[0]
+                                experience = exp_parent.inner_text().strip()
+                        except: pass
+
+                        if experience == "N/A":
+                             # Fallback
+                             exp_el = job_page.query_selector("[class*='exp'] span") or \
+                                      job_page.query_selector(".exp")
+                             if exp_el:
+                                 experience = exp_el.inner_text().strip()
                             
                         # Salary
                         salary = "N/A"
-                        # class contains 'salary'
-                        sal_el = job_page.query_selector("[class*='salary'] span") or \
-                                 job_page.query_selector("[class*='salary']") or \
-                                 job_page.query_selector(".salary")
-                        if sal_el:
-                            salary = sal_el.inner_text().strip()
+                        # Try specific icon-based selector first (from screenshot)
+                        # Structure: div.styles_jhc__salary__jdfEC > i.ni-icon-salary + span
+                        try:
+                            sal_icon = job_page.query_selector("i.ni-icon-salary")
+                            if sal_icon:
+                                sal_parent = sal_icon.xpath("..")[0]
+                                salary = sal_parent.inner_text().strip()
+                        except: pass
+                        
+                        if salary == "N/A":
+                            # Fallback but be careful not to grab experience
+                            sal_el = job_page.query_selector("li:has-text('PA')") or \
+                                     job_page.query_selector("li:has-text('Disclosed')") 
+                                     
+                            # Removed .salary as it matches footer/sidebar junk
                             
-                        # Description
+                            if sal_el:
+                                salary = sal_el.inner_text().strip()
+                        
+                        # Validate Salary: If it's too long or has newlines, it's likely a menu/junk
+                        if len(salary) > 50 or '\n' in salary:
+                             salary = "N/A"
+
+
+                        # Description and Metadata
                         description = "N/A"
-                        # class contains 'job-desc'
-                        desc_el = job_page.query_selector("[class*='job-desc']") or \
-                                  job_page.query_selector(".dang-inner-html") or \
+                        key_skills = []
+                        metadata = {}
+
+                        # Try to find the description container
+                        desc_el = job_page.query_selector(".dang-inner-html") or \
+                                  job_page.query_selector("[class*='job-desc']") or \
                                   job_page.query_selector("#job-description")
+                        
                         if desc_el:
                             description = desc_el.inner_text().strip()
                         
+                        # Extract Key Skills as an array
+                        try:
+                            # Naukri chips for skills
+                            skill_chips = job_page.query_selector_all("a[class*='chip']") or \
+                                          job_page.query_selector_all(".key-skill a") or \
+                                          job_page.query_selector_all(".skills-container a")
+                            
+                            if skill_chips:
+                                for chip in skill_chips:
+                                    skill_text = chip.inner_text().strip()
+                                    if skill_text and skill_text not in key_skills:
+                                        key_skills.append(skill_text)
+                        except: pass
+
+                        # Extract other details (Role, Industry, etc.)
+                        try:
+                            # Usually in labels followed by values
+                            # Or in a specific details section
+                            detail_labels = job_page.query_selector_all("label")
+                            for label in detail_labels:
+                                label_text = label.inner_text().strip().replace(":", "")
+                                if any(k in label_text for k in ["Role", "Industry Type", "Department", "Employment Type", "Education"]):
+                                    # Value is usually next sibling or in same parent
+                                    try:
+                                        val = label.evaluate("el => el.nextElementSibling ? el.nextElementSibling.innerText : ''")
+                                        if not val:
+                                            # Fallback: check index in parent
+                                            val = label.evaluate("el => el.parentElement.innerText.replace(el.innerText, '').strip()")
+                                        
+                                        if val and len(val) < 200: # Sanity check
+                                            metadata[label_text] = val.strip()
+                                    except: pass
+                        except: pass
+                        
+                        # Post Date
+                        post_date = "N/A"
+                        # From screenshot: label "Posted:" sibling span
+                        # Selector: label:has-text("Posted:") + span
+                        try:
+                            # Try finding the label first
+                            posted_label = job_page.locator("label:has-text('Posted:')")
+                            if posted_label.count() > 0:
+                                # Get the next sibling span
+                                date_span = posted_label.locator("xpath=following-sibling::span").first
+                                if date_span.is_visible():
+                                    post_date = date_span.inner_text().strip()
+                        except: pass
+                        
+                        if post_date == "N/A":
+                            # Fallback to the previous class selector if specific one fails
+                            date_el = job_page.query_selector(".job-post-day") or \
+                                      job_page.query_selector("[class*='stat'] span")
+                            if date_el:
+                                post_date = date_el.inner_text().strip()
+                        
+
+                        # Clean description to remove redundant footer (Role, Industry, etc. and Key Skills)
+                        # These are often preceded by "read more" or just appear at the end.
+                        if description != "N/A":
+                             # Remove "read more" and everything after it
+                             if "read more" in description.lower():
+                                 description = re.split(r"read more", description, flags=re.IGNORECASE)[0].strip()
+                             
+                             # Remove Role/Industry footer if it exists and we've already extracted it
+                             if "Role:" in description:
+                                 description = description.split("Role:")[0].strip()
+
                         job_data = {
                             "title": title,
                             "company": company,
@@ -145,9 +244,11 @@ def scrape_naukri_jobs(query, location=None):
                             "experience": experience,
                             "salary": salary,
                             "job_description": description,
+                            "key_skills": key_skills,
+                            "metadata": metadata,
                             "job_url": job_url,
                             "job_board": "naukri",
-                            "post_date": "N/A"
+                            "post_date": post_date,
                         }
                         
                         extracted_jobs.append(job_data)
@@ -163,10 +264,11 @@ def scrape_naukri_jobs(query, location=None):
                         continue
 
                 # Check for Next Button
-                # Selector: a.mw-25.btn-next usually.
-                # Use a specific selector to avoid matching random text.
-                # Check for Next Button
                 print("Checking for next button...")
+                
+                # Scroll to bottom to ensure "Next" button is loaded and visible
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(2) # Wait for potential dynamic content
                 
                 # Close potential privacy banner first
                 try: 
@@ -176,14 +278,13 @@ def scrape_naukri_jobs(query, location=None):
                         time.sleep(0.5)
                 except: pass
 
-                # Robust selector for Next button: 
-                # 1. Contains text "Next"
-                # 2. Is an 'a' tag (usually) or button
-                # 3. Not disabled
                 try:
-                    # Generic text match is safest because class names like 'styles_btn-secondary__2AsIP' change often.
-                    # We check visible 'Next' buttons.
-                    next_btn = page.query_selector("a:has-text('Next')") or page.query_selector("button:has-text('Next')")
+                    # Try specific class first if known, then text match
+                    # Class might change, but "Next" text is usually consistent
+                    next_btn = page.query_selector("a.styles_btn-secondary__2AsIP:has-text('Next')") or \
+                               page.query_selector("a:has-text('Next')") or \
+                               page.query_selector("button:has-text('Next')") or \
+                               page.query_selector(".styles_btn-secondary__2AsIP")
                     
                     if next_btn and next_btn.is_visible():
                         # Check disabled state
@@ -192,23 +293,26 @@ def scrape_naukri_jobs(query, location=None):
                         classes = next_btn.get_attribute("class") or ""
                         
                         if is_disabled or "disabled" in classes.lower() or "previous" in classes.lower():
-                            # If we matched 'Next' text but it's actually disabled or weirdly the previous button (unlikely with has-text Next)
-                            print("Next button found but disabled. Optimization loop finished.")
+                            print("Next button found but disabled or is 'Previous' button. Optimization loop finished.")
                             break
                         
                         print("Navigating to next page...")
+                        # Use force=True to bypass potential overlays
+                        # Also use JS click as a fallback if Playwright click fails
+                        try:
+                            next_btn.click(force=True, timeout=10000)
+                        except:
+                            next_btn.evaluate("el => el.click()")
+
+                        # Wait for page navigation or content update
+                        # domcontentloaded is more reliable than networkidle for sites with heavy trackers
+                        try:
+                            page.wait_for_load_state("domcontentloaded", timeout=30000)
+                        except: pass
                         
-                        # Scroll into view with margin to avoid sticky header
-                        next_btn.scroll_into_view_if_needed()
-                        page.evaluate("window.scrollBy(0, -100)") # Scroll up a bit so it's not under header/footer
-                        time.sleep(1)
-                        
-                        # Force click with JS to bypass overlays
-                        next_btn.evaluate("e => e.click()")
-                        
-                        time.sleep(5) # Wait for potential SPA transition or reload
+                        # Wait specifically for results to refresh
+                        time.sleep(random.uniform(3, 5))
                         page_num += 1
-                        page.wait_for_load_state("domcontentloaded")
                     else:
                         print("No next button found. Optimization loop finished.")
                         break
