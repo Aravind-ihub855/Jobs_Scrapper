@@ -113,15 +113,18 @@ def scrape_naukri_jobs(query, location=None, max_pages=10):
                             
                         # Experience
                         experience = "N/A"
-                        # Try specific icon-based selector first (from screenshot)
-                        # Structure: div.styles_jhc__exp__k_giM > i.ni-icon-bag + span
                         try:
-                            exp_icon = job_page.query_selector("i.ni-icon-bag")
-                            if exp_icon:
-                                # siblings or parent's text
-                                # The span is a sibling/in same parent
-                                exp_parent = exp_icon.xpath("..")[0]
-                                experience = exp_parent.inner_text().strip()
+                            # 1. Try finding by icon then sibling span (most reliable)
+                            exp_span = job_page.query_selector("i.ni-icon-bag + span") or \
+                                       job_page.query_selector("i.ni-icon-bag + [class*='exp'] span")
+                            if exp_span:
+                                experience = exp_span.inner_text().strip()
+                            
+                            if experience == "N/A":
+                                # 2. Try container
+                                exp_container = job_page.query_selector("[class*='exp']")
+                                if exp_container:
+                                    experience = exp_container.inner_text().strip()
                         except: pass
 
                         if experience == "N/A":
@@ -130,16 +133,21 @@ def scrape_naukri_jobs(query, location=None, max_pages=10):
                                       job_page.query_selector(".exp")
                              if exp_el:
                                  experience = exp_el.inner_text().strip()
-                            
+                             
                         # Salary
                         salary = "N/A"
-                        # Try specific icon-based selector first (from screenshot)
-                        # Structure: div.styles_jhc__salary__jdfEC > i.ni-icon-salary + span
                         try:
-                            sal_icon = job_page.query_selector("i.ni-icon-salary")
-                            if sal_icon:
-                                sal_parent = sal_icon.xpath("..")[0]
-                                salary = sal_parent.inner_text().strip()
+                            # 1. Try finding by icon then sibling span (from screenshot)
+                            sal_span = job_page.query_selector("i.ni-icon-salary + span") or \
+                                       job_page.query_selector("i.ni-icon-salary + [class*='salary'] span")
+                            if sal_span:
+                                salary = sal_span.inner_text().strip()
+                            
+                            if salary == "N/A":
+                                # 2. Try container (from screenshot: styles_jhc__salary__jdfEC)
+                                sal_container = job_page.query_selector("[class*='salary']")
+                                if sal_container:
+                                    salary = sal_container.inner_text().strip()
                         except: pass
                         
                         if salary == "N/A":
