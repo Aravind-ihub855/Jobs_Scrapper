@@ -9,12 +9,17 @@ def slugify(text: str) -> str:
     text = re.sub(r'\s+', '-', text)
     return text.strip("-")
 
-def scrape_whatjobs_jobs(query, location=None):
+def scrape_whatjobs_jobs(query, location=None, max_pages=5):
     extracted_jobs = []
 
     base_url = "https://en-in.whatjobs.com/jobs"
     query_slug = slugify(query)
-    search_url = f"{base_url}/{query_slug}"
+    
+    if location:
+        location_slug = slugify(location)
+        search_url = f"{base_url}/{query_slug}/{location_slug}"
+    else:
+        search_url = f"{base_url}/{query_slug}"
 
     print(f"Scraping WhatJobs URL: {search_url}")
 
@@ -34,7 +39,7 @@ def scrape_whatjobs_jobs(query, location=None):
                 pass
 
             # --- Find total number of pages from pagination bar ---
-            total_pages = 1
+            detected_pages = 1
             try:
                 # Find all pagination number links
                 pagination_links = page.query_selector_all(".pagination li.page-item.searchResultPage:not(.active) span.page-link, .pagination li.page-item.searchResultPage:not(.active) a.page-link")
@@ -47,17 +52,20 @@ def scrape_whatjobs_jobs(query, location=None):
                     except Exception:
                         continue
                 if page_numbers:
-                    total_pages = max(page_numbers)
+                    detected_pages = max(page_numbers)
             except Exception as e:
                 print(f"Could not determine total pages: {e}")
 
-            print(f"Total pages detected: {total_pages}")
+            # Use the smaller of detected pages or user requested max_pages
+            final_max_pages = min(detected_pages, max_pages) if detected_pages > 0 else max_pages
+            print(f"Detected pages: {detected_pages}, Scraping up to: {final_max_pages}")
 
             # --- Loop through all pages ---
-            for current_page in range(1, total_pages + 1):
+            for current_page in range(1, final_max_pages + 1):
                 if current_page == 1:
                     page_url = search_url
                 else:
+                    # Append /page-n correctly after the slugs
                     page_url = f"{search_url}/page-{current_page}"
 
                 print(f"\n=== Scraping Page {current_page} ({page_url}) ===")
@@ -115,6 +123,12 @@ def scrape_whatjobs_jobs(query, location=None):
                                 except Exception as click_err:
                                     print(f"Click failed for card {i}, skipping expansion: {click_err}")
 
+                        # 5. Post Date
+                        post_date = "N/A"
+                        post_el = card.query_selector(".postedDate")
+                        if post_el:
+                            post_date = post_el.inner_text().strip()
+
                         job_id = card.get_attribute("data-id") or f"whatjobs-{i}"
                         job_link = f"{search_url}?id={job_id}"
 
@@ -126,7 +140,7 @@ def scrape_whatjobs_jobs(query, location=None):
                             "job_url": job_link,
                             "salary": salary,
                             "job_board": "whatjobs",
-                            "post_date": "N/A"
+                            "post_date": post_date
                         }
                         job_data["job_description"] = description
                         extracted_jobs.append(job_data)

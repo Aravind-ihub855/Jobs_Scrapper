@@ -120,14 +120,30 @@ async def scrape_monster(
 @app.get("/scrape/whatjobs")
 async def scrape_whatjobs(
     query: str = Query(..., example="Data Scientist"),
-    location: str = Query(None, example="London")
+    location: str = Query(None, example="London"),
+    pages: int = Query(2, example=2, description="Number of pages to scrape")
     ):
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
-    jobs = await loop.run_in_executor(executor, scrape_whatjobs_jobs, query, location)
+    jobs = await loop.run_in_executor(executor, scrape_whatjobs_jobs, query, location, pages)
     
+    saved_count = 0
     if jobs:
-        await whatjobs_collection.insert_many(jobs)
+        # Use upsert to avoid duplicates based on job_url
+        for job in jobs:
+            if "job_url" in job and job["job_url"]:
+                result = await whatjobs_collection.update_one(
+                    {"job_url": job["job_url"]},
+                    {"$set": job},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                # If no URL, just insert (less ideal but safe)
+                await whatjobs_collection.insert_one(job)
+                saved_count += 1
+
         # Convert ObjectId to string for JSON serialization
         for job in jobs:
             if "_id" in job:
@@ -137,6 +153,7 @@ async def scrape_whatjobs(
         "query": query,
         "location": location,
         "total_jobs_scraped": len(jobs),
+        "new_or_updated_jobs": saved_count,
         "status": "success",
         "data": jobs
     }
