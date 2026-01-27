@@ -121,7 +121,7 @@ async def scrape_monster(
 async def scrape_whatjobs(
     query: str = Query(..., example="Data Scientist"),
     location: str = Query(None, example="London"),
-    pages: int = Query(2, example=2, description="Number of pages to scrape")
+    pages: int = Query(5, example=5, description="Number of pages to scrape")
     ):
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
