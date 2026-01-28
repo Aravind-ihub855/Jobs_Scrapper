@@ -9,7 +9,7 @@ def slugify(text: str) -> str:
     text = re.sub(r'\s+', '-', text)
     return text.strip("-")
 
-def scrape_whatjobs_jobs(query, location=None, max_pages=5):
+def scrape_whatjobs_jobs(query, location=None, max_pages=5, date_posted=None):
     extracted_jobs = []
 
     base_url = "https://en-in.whatjobs.com/jobs"
@@ -17,11 +17,11 @@ def scrape_whatjobs_jobs(query, location=None, max_pages=5):
     
     if location:
         location_slug = slugify(location)
-        search_url = f"{base_url}/{query_slug}/{location_slug}"
+        search_base = f"{base_url}/{query_slug}/{location_slug}"
     else:
-        search_url = f"{base_url}/{query_slug}"
+        search_base = f"{base_url}/{query_slug}"
 
-    print(f"Scraping WhatJobs URL: {search_url}")
+    print(f"Scraping WhatJobs Base: {search_base}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
@@ -29,16 +29,29 @@ def scrape_whatjobs_jobs(query, location=None, max_pages=5):
         page = context.new_page()
 
         try:
-            page.goto(search_url, timeout=60000)
+            # Initial URL for detecting pages should include filters if any
+            initial_url = search_base
+            if date_posted:
+                initial_url += f"?pD={date_posted}"
+            
+            page.goto(initial_url, timeout=60000)
             page.wait_for_selector(".ajCard", timeout=15000)
 
             # Handle potential popups (WhatJobs has cookie/alert popups often)
             try:
+                # Close "Understood" cookie popup
+                if page.locator("button:has-text('Understood')").is_visible():
+                    page.click("button:has-text('Understood')", timeout=2000)
+                
+                # Close "one-click apply" modal if it blocks the view
+                if page.locator("#ajCVModal").is_visible():
+                    page.click("#ajCVModal .btn-close", timeout=2000)
+                
                 page.click("button:has-text('Accept')", timeout=2000)
             except:
                 pass
 
-            # --- Find total number of pages from pagination bar ---
+            # --- Find total number of pages ---
             detected_pages = 1
             try:
                 # Find all pagination number links
@@ -63,15 +76,29 @@ def scrape_whatjobs_jobs(query, location=None, max_pages=5):
             # --- Loop through all pages ---
             for current_page in range(1, final_max_pages + 1):
                 if current_page == 1:
-                    page_url = search_url
+                    page_url = initial_url
                 else:
-                    # Append /page-n correctly after the slugs
-                    page_url = f"{search_url}/page-{current_page}"
+                    # Append /page-n correctly after the slugs, before query params
+                    page_url = f"{search_base}/page-{current_page}"
+                    if date_posted:
+                        page_url += f"?pD={date_posted}"
 
                 print(f"\n=== Scraping Page {current_page} ({page_url}) ===")
                 if current_page > 1:
                     page.goto(page_url, timeout=60000)
-                    page.wait_for_selector(".ajCard", timeout=15000)
+                    try:
+                        page.wait_for_selector(".ajCard", timeout=10000)
+                    except:
+                        print(f"Warning: .ajCard not found on page {current_page}. It might be empty or a popup is blocking.")
+
+                # Re-run popup and modal handling inside the loop for every page
+                try:
+                    if page.locator("button:has-text('Understood')").is_visible():
+                        page.click("button:has-text('Understood')", timeout=2000)
+                    if page.locator("#ajCVModal .btn-close").is_visible():
+                        page.click("#ajCVModal .btn-close", timeout=2000)
+                except:
+                    pass
 
                 cards = page.query_selector_all(".ajCard")
                 print(f"Found {len(cards)} cards on page {current_page}.")
@@ -116,8 +143,14 @@ def scrape_whatjobs_jobs(query, location=None, max_pages=5):
                             if is_expanded != "true":
                                 time.sleep(0.5)
                                 try:
-                                    card.click(timeout=3000)
+                                    # Use force=True to bypass modal interception if it happened again
+                                    card.click(timeout=3000, force=True)
                                     page.wait_for_timeout(1000)
+                                    
+                                    # Re-check for modal and close it if it popped up from the click
+                                    if page.locator("#ajCVModal").is_visible():
+                                        page.locator("#ajCVModal .btn-close").click()
+                                        
                                     if desc_el:
                                         description = desc_el.inner_text().strip()
                                 except Exception as click_err:
@@ -130,7 +163,7 @@ def scrape_whatjobs_jobs(query, location=None, max_pages=5):
                             post_date = post_el.inner_text().strip()
 
                         job_id = card.get_attribute("data-id") or f"whatjobs-{i}"
-                        job_link = f"{search_url}?id={job_id}"
+                        job_link = f"{page_url}?id={job_id}"
 
                         job_data = {
                             "title": title,

@@ -171,12 +171,23 @@ async def scrape_monster(
 @app.get("/scrape/whatjobs")
 async def scrape_whatjobs(
     query: str = Query(..., example="Data Scientist"),
-    location: str = Query(None, example="London"),
-    pages: int = Query(5, example=5, description="Number of pages to scrape")
+    location: str = Query(None, example="Bengaluru"),
+    pages: int = Query(5, example=5, description="Number of pages to scrape"),
+    date_posted: Optional[str] = Query(None, enum=["Last 24 hours", "3 Days", "7 Days", "14+ Days"], description="Filter by date posted")
     ):
+    
+    # Map user-friendly labels to internal values (pD)
+    date_posted_map = {
+        "Last 24 hours": 4,
+        "3 Days": 3,
+        "7 Days": 2,
+        "14+ Days": 1
+    }
+    mapped_date_posted = date_posted_map.get(date_posted) if date_posted else None
+
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
-    jobs = await loop.run_in_executor(executor, scrape_whatjobs_jobs, query, location, pages)
+    jobs = await loop.run_in_executor(executor, scrape_whatjobs_jobs, query, location, pages, mapped_date_posted)
     
     saved_count = 0
     if jobs:
