@@ -2,11 +2,13 @@ from playwright.sync_api import sync_playwright
 import time
 from urllib.parse import quote_plus
 
-BASE_URL = "https://www.simplyhired.com/search?q={query}&l="
+BASE_URL = "https://www.simplyhired.co.in/search?q={query}"
 
-def scrape_simplyhired_jobs(search_query: str):
+def scrape_simplyhired_jobs(search_query: str, location: str = None, max_pages: int = 5):
     encoded_query = quote_plus(search_query)
     url = BASE_URL.format(query=encoded_query)
+    if location:
+        url += f"&l={quote_plus(location)}"
 
     jobs = []
 
@@ -18,12 +20,11 @@ def scrape_simplyhired_jobs(search_query: str):
             page.goto(url, timeout=60000)
 
             # Find total number of pages from pagination bar
-            total_pages = 1
+            detected_pages = 1
             try:
-                # Wait for pagination bar to load (if present)
-                page.wait_for_selector("nav[aria-label='pagination'], ul.pagination", timeout=5000)
-                # Try to get the last page number from pagination links
-                page_numbers = page.locator("nav[aria-label='pagination'] a, ul.pagination a").all()
+                # Wait for pagination bar to load
+                page.wait_for_selector("nav[aria-label='pagination'], ul.pagination, .pagination", timeout=8000)
+                page_numbers = page.locator("nav[aria-label='pagination'] a, ul.pagination a, .pagination a").all()
                 page_nums = []
                 for a in page_numbers:
                     try:
@@ -33,34 +34,37 @@ def scrape_simplyhired_jobs(search_query: str):
                     except:
                         continue
                 if page_nums:
-                    total_pages = max(page_nums)
+                    detected_pages = max(page_nums)
+                    print(f"Max detected pages from bar: {detected_pages}")
             except Exception as e:
-                print(f"Pagination bar not found or error: {e}")
+                print(f"Pagination bar not found or timeout: {e}")
+                # Fallback: Check if there's a "Next" button as a hint there are more pages
+                if page.locator("a[aria-label='Next'], a:has-text('Next')").count() > 0:
+                    detected_pages = 5 # Assume at least a few pages if "Next" exists
+                    print("Next button found, assuming multiple pages.")
 
-            print(f"Total pages detected: {total_pages}")
+            print(f"Pagination detection hinted at {detected_pages} pages, but we will attempt up to {max_pages} pages via 'Next' button clicks.")
 
-            for page_num in range(1, total_pages + 1):
-                if page_num == 1:
-                    page_url = url
-                else:
-                    # SimplyHired paginates with /page-{n} at the end
-                    page_url = url + f"&pn={page_num}"
-                print(f"Scraping page {page_num}: {page_url}")
-                page.goto(page_url, timeout=60000)
-
-                # Infinite scroll logic (if needed)
-                last_height = page.evaluate("document.body.scrollHeight")
-                for _ in range(5):
-                    page.mouse.wheel(0, 5000)
+            current_page = 1
+            while current_page <= max_pages:
+                print(f"--- Scraping Page {current_page} ---")
+                
+                # Wait for job cards
+                try:
+                    page.wait_for_selector("div[data-testid='searchSerpJob']", timeout=12000)
+                except:
+                    print(f"Timeout waiting for job cards on page {current_page}")
+                
+                # Scroll down to ensure all jobs are loaded/visible
+                for _ in range(3):
+                    page.mouse.wheel(0, 2000)
                     time.sleep(1)
-                    new_height = page.evaluate("document.body.scrollHeight")
-                    if new_height == last_height:
-                        break
-                    last_height = new_height
 
                 job_cards = page.locator("div[data-testid='searchSerpJob']").all()
+                print(f"Found {len(job_cards)} jobs on page {current_page}")
+
                 if not job_cards:
-                    print("No job listings found on the page")
+                    break
 
                 for card in job_cards:
                     try:
@@ -69,7 +73,8 @@ def scrape_simplyhired_jobs(search_query: str):
                         if title_elem.count() > 0:
                             title = title_elem.inner_text().strip()
                             href = title_elem.get_attribute("href")
-                            job_url = f"https://www.simplyhired.com{href}" if href else None
+                            # Use .co.in for consistency
+                            job_url = f"https://www.simplyhired.co.in{href}" if href else None
                         else:
                             title = "N/A"
                             job_url = None
@@ -106,6 +111,15 @@ def scrape_simplyhired_jobs(search_query: str):
                                 print(f"Scrolling error: {e}")
                             time.sleep(1)
 
+                        posted_date = "N/A"
+                        try:
+                            # From user screenshot: viewJobBodyJobPostingTimestamp -> detailText
+                            posted_elem = page.locator("span[data-testid='viewJobBodyJobPostingTimestamp'] span[data-testid='detailText']").first
+                            if posted_elem.count() > 0:
+                                posted_date = posted_elem.inner_text().strip()
+                        except:
+                            pass
+
                         def safe_get_text(locator):
                             try:
                                 if locator.count() > 0:
@@ -137,20 +151,29 @@ def scrape_simplyhired_jobs(search_query: str):
                             description = desc_elem.inner_text().strip()
 
                         qualifications = []
-                        qual_header_text = "Qualifications"
-                        if page.locator("h2:has-text('Qualifications')").count() == 0:
-                            qual_header_text = "Requirements"
-                        qual_elem = get_section_content(qual_header_text)
-                        if qual_elem:
-                            lis = qual_elem.locator("li").all()
-                            if lis:
-                                qualifications = [li.inner_text().strip() for li in lis]
-                            else:
-                                spans = qual_elem.locator("span").all()
-                                qualifications = [s.inner_text().strip() for s in spans if len(s.inner_text().strip()) > 1]
-                                if not qualifications:
-                                    text = qual_elem.inner_text()
-                                    qualifications = [l.strip() for l in text.split('\n') if len(l.strip()) > 1]
+                        # Try the specific data-testid from user screenshot first
+                        try:
+                            qual_items = page.locator("span[data-testid='viewJobQualificationItem']").all()
+                            if qual_items:
+                                qualifications = [q.inner_text().strip() for q in qual_items if q.inner_text().strip()]
+                        except:
+                            pass
+                        
+                        if not qualifications:
+                            qual_header_text = "Qualifications"
+                            if page.locator("h2:has-text('Qualifications')").count() == 0:
+                                qual_header_text = "Requirements"
+                            qual_elem = get_section_content(qual_header_text)
+                            if qual_elem:
+                                lis = qual_elem.locator("li").all()
+                                if lis:
+                                    qualifications = [li.inner_text().strip() for li in lis]
+                                else:
+                                    spans = qual_elem.locator("span").all()
+                                    qualifications = [s.inner_text().strip() for s in spans if len(s.inner_text().strip()) > 1]
+                                    if not qualifications:
+                                        text = qual_elem.inner_text()
+                                        qualifications = [l.strip() for l in text.split('\n') if len(l.strip()) > 1]
 
                         job_type = "N/A"
                         details_elem = get_section_content("Job Details")
@@ -189,6 +212,7 @@ def scrape_simplyhired_jobs(search_query: str):
                             "location": location,
                             "salary": salary,
                             "job_type": job_type,
+                            "posted_date": posted_date,
                             "qualifications": qualifications,
                             "job_description": description,
                             "job_url": job_url,
@@ -198,6 +222,25 @@ def scrape_simplyhired_jobs(search_query: str):
                     except Exception as e:
                         print(f"Error processing individual job: {e}")
                         continue
+                
+                # Check for Next Page
+                if current_page >= max_pages:
+                    break
+                    
+                next_button = page.locator("a[aria-label='Next'], a:has-text('Next')").first
+                if next_button.count() > 0:
+                    print(f"Moving from page {current_page} to {current_page + 1}")
+                    try:
+                        next_button.scroll_into_view_if_needed()
+                        next_button.click()
+                        current_page += 1
+                        time.sleep(5) # Wait for next page to load results
+                    except Exception as e:
+                        print(f"Could not click next button: {e}")
+                        break
+                else:
+                    print(f"No more pages found after page {current_page}")
+                    break
         except Exception as e:
             print(f"Scraping error: {e}")
         finally:
