@@ -213,12 +213,30 @@ async def scrape_whatjobs(
 async def scrape_naukri(
     query: str = Query(..., example="Data Engineer Intern"),
     location: str = Query(None, example="Bengaluru"),
-    pages: int = Query(5, example=5, description="Number of pages to scrape")
+    pages: int = Query(5, example=5, description="Number of pages to scrape"),
+    freshness: Optional[int] = Query(None, enum=[1, 3, 7, 15, 30], description="Freshness in days"),
+    salary: Optional[str] = Query(None, enum=["0-3 Lakhs", "3-6 Lakhs", "6-10 Lakhs", "10-15 Lakhs", "15-25 Lakhs", "25-50 Lakhs", "50-75 Lakhs", "75-100 Lakhs", "1-5 Cr", "5+ Cr"], description="Salary range")
     ):
+    
+    # Map user-friendly salary to internal value
+    salary_map = {
+        "0-3 Lakhs": "0to3", "0-3": "0to3", "0to3": "0to3",
+        "3-6 Lakhs": "3to6", "3-6": "3to6", "3to6": "3to6",
+        "6-10 Lakhs": "6to10", "6-10": "6to10", "6to10": "6to10",
+        "10-15 Lakhs": "10to15", "10-15": "10to15", "10to15": "10to15",
+        "15-25 Lakhs": "15to25", "15-25": "15to25", "15to25": "15to25",
+        "25-50 Lakhs": "25to50", "25-50": "25to50", "25to50": "25to50",
+        "50-75 Lakhs": "50to75", "50-75": "50to75", "50to75": "50to75",
+        "75-100 Lakhs": "75to100", "75-100": "75to100", "75to100": "75to100",
+        "1-5 Cr": "100to500", "1-5": "100to500", "100to500": "100to500",
+        "5+ Cr": "500to1000", "5+": "500to1000", "500to1000": "500to1000"
+    }
+    mapped_salary = salary_map.get(salary) if salary else None
+
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
-    # Pass pages to the scraper
-    jobs = await loop.run_in_executor(executor, scrape_naukri_jobs, query, location, pages)
+    # Pass pages and filters to the scraper
+    jobs = await loop.run_in_executor(executor, scrape_naukri_jobs, query, location, pages, freshness, mapped_salary)
     
     saved_count = 0
     if jobs:

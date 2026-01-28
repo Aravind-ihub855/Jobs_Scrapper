@@ -2,22 +2,35 @@ from playwright.sync_api import sync_playwright
 import time
 import random
 import re
+from urllib.parse import quote_plus
 
-def scrape_naukri_jobs(query, location=None, max_pages=10):
+def scrape_naukri_jobs(query, location=None, max_pages=10, freshness=None, salary=None):
     extracted_jobs = []
     
     # Construct URL
-    # Use generic generic valid format: https://www.naukri.com/{slug}-jobs?k={query}&l={location}
-    # This avoids 404s when a specific "slug-in-location" page doesn't exist.
-    query_slug = query.lower().replace(" ", "-")
-    query_param = query.replace(" ", "%20")
-    
-    base_url = f"https://www.naukri.com/{query_slug}-jobs"
-    search_url = f"{base_url}?k={query_param}"
+    # Naukri prefers SEO-friendly slugs: /query-jobs-in-location
+    query_slug = quote_plus(query.lower()).replace("+", "-")
+    query_param = quote_plus(query)
     
     if location:
-        location_param = location.replace(" ", "%20")
-        search_url += f"&l={location_param}"
+        location_slug = quote_plus(location.lower()).replace("+", "-")
+        base_url = f"https://www.naukri.com/{query_slug}-jobs-in-{location_slug}"
+    else:
+        base_url = f"https://www.naukri.com/{query_slug}-jobs"
+    
+    search_url = f"{base_url}?k={query_param}"
+    if location:
+        search_url += f"&l={quote_plus(location)}"
+    
+    # Add filters
+    if freshness:
+        search_url += f"&jobAge={freshness}"
+    
+    if salary:
+        search_url += f"&ctcFilter={salary}"
+    
+    # Add tracking param to look more like a manual search
+    search_url += "&nignbevent_src=jobsearchDeskGNB"
     
     print(f"Scraping Naukri URL: {search_url}")
 
