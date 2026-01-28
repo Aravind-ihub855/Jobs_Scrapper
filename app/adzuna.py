@@ -13,7 +13,15 @@ def scrape_adzuna_jobs(search_query: str, location: str = None, max_pages: int =
     # Smart domain selection: default to .in if location is Indian or user specifies India
     base_url = BASE_URL_COM
     is_india = False
-    indian_cities = ["bengaluru", "bangalore", "coimbatore", "chennai", "hyderabad", "mumbai", "delhi", "pune", "india"]
+    indian_cities = [
+        "bengaluru", "bangalore", "coimbatore", "chennai", "hyderabad", "mumbai", "delhi", "pune", "india",
+        "kolkata", "kochi", "ahmedabad", "jaipur", "lucknow", "chandigarh", "surat", "indore", "nagpur",
+        "vishakhapatnam", "patna", "vadodara", "ghaziabad", "ludhiana", "agra", "nashik", "faridabad",
+        "meerut", "rajkot", "varanasi", "srinagar", "aurangabad", "dhanbad", "amritsar", "navi mumbai",
+        "allahabad", "howrah", "gwalior", "jabalpur", "raipur", "jodhpur", "bareilly", "moradabad",
+        "mysore", "gurgaon", "noida", "greater noida", "thiruvananthapuram", "bhopal", "visakhapatnam",
+        "kanpur", "thane", "solapur", "hubballi", "dharwad", "tiruchirappalli", "bareilly", "aligarh"
+    ]
     if location and any(city in location.lower() for city in indian_cities):
         base_url = BASE_URL_IN
         is_india = True
