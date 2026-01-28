@@ -72,23 +72,38 @@ async def scrape_simplyhired(
 @app.get("/scrape/adzuna")
 async def scrape_adzuna(
     query: str = Query(..., example="Java Developer"),
-    location: str = Query(None, example="US")
+    location: str = Query(None, example="Bengaluru"),
+    pages: int = Query(5, example=5, description="Number of pages to scrape")
     ):
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
-    jobs = await loop.run_in_executor(executor, scrape_adzuna_jobs, query, location)
+    jobs = await loop.run_in_executor(executor, scrape_adzuna_jobs, query, location, pages)
     
+    saved_count = 0
     if jobs:
-        await adzuna_collection.insert_many(jobs)
+        for job in jobs:
+            if "job_url" in job and job["job_url"]:
+                result = await adzuna_collection.update_one(
+                    {"job_url": job["job_url"]},
+                    {"$set": job},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                await adzuna_collection.insert_one(job)
+                saved_count += 1
+        
         # Convert ObjectId to string for JSON serialization
         for job in jobs:
-            if "_id" in job:
+            if "_id" in job and not isinstance(job["_id"], str):
                 job["_id"] = str(job["_id"])
 
     return {
         "query": query,
         "location": location,
         "total_jobs_scraped": len(jobs),
+        "new_or_updated_jobs": saved_count,
         "status": "success",
         "data": jobs
     }

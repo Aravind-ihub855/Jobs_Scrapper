@@ -7,148 +7,142 @@ BASE_URL_COM = "https://www.adzuna.com/search?q={query}"
 BASE_URL_IN = "https://www.adzuna.in/search?q={query}"
 
 
-def scrape_adzuna_jobs(search_query: str, location: str = None):
+def scrape_adzuna_jobs(search_query: str, location: str = None, max_pages: int = 5):
     encoded_query = quote_plus(search_query)
 
-    # Domain selection
+    # Smart domain selection: default to .in if location is Indian or user specifies India
     base_url = BASE_URL_COM
-    if location and location.lower() == "india":
+    is_india = False
+    indian_cities = ["bengaluru", "bangalore", "coimbatore", "chennai", "hyderabad", "mumbai", "delhi", "pune", "india"]
+    if location and any(city in location.lower() for city in indian_cities):
         base_url = BASE_URL_IN
+        is_india = True
 
     url = base_url.format(query=encoded_query)
-
     if location:
         url += f"&w={quote_plus(location)}"
 
     jobs = []
+    currency_symbol = "₹" if is_india else "$"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
 
         try:
-            page_number = 1
-
-            # ============================
-            # 🔁 PAGINATION LOOP (NEW)
-            # ============================
-            while True:
-                paginated_url = url if page_number == 1 else f"{url}&p={page_number}"
-                print(f"\n🔍 Scraping Adzuna page {page_number}: {paginated_url}")
+            current_page = 1
+            while current_page <= max_pages:
+                paginated_url = url if current_page == 1 else f"{url}&p={current_page}"
+                print(f"\n🔍 Scraping Adzuna page {current_page}: {paginated_url}")
 
                 page.goto(paginated_url, timeout=60000)
-                page.wait_for_selector("body")
+                try:
+                    page.wait_for_selector("article[data-aid], .ui-job-card", timeout=10000)
+                except:
+                    print(f"No job cards found on page {current_page}")
+                    break
 
-                # Try extracting embedded JSON
+                # Try extracting embedded JSON for cleaner data
                 data = None
                 try:
                     data = page.evaluate('() => window["az_wj_data"]')
                 except:
                     pass
 
-                # ============================
-                # ✅ JSON EXTRACTION PATH
-                # ============================
+                page_jobs = []
                 if data and "results" in data and len(data["results"]) > 0:
                     results = data["results"]
-                    print(f"✅ Found {len(results)} jobs on page {page_number}")
-
+                    print(f"✅ Found {len(results)} jobs on page {current_page} via JSON")
                     for item in results:
                         try:
-                            title = item.get("title", "N/A") \
-                                .replace("<strong>", "") \
-                                .replace("</strong>", "")
-
+                            title = item.get("title", "N/A").replace("<strong>", "").replace("</strong>", "")
                             company = item.get("company", "N/A")
                             job_location = item.get("location_raw", "N/A")
-
+                            
                             salary_min = item.get("salary_min")
                             salary_max = item.get("salary_max")
                             salary = "N/A"
-
-                            try:
-                                if salary_min:
-                                    salary = f"${float(salary_min):,.0f}"
-                                    if salary_max and salary_max != salary_min:
-                                        salary += f" - ${float(salary_max):,.0f}"
-                            except:
-                                salary = str(salary_min) if salary_min else "N/A"
+                            if salary_min:
+                                salary = f"{currency_symbol}{float(salary_min):,.0f}"
+                                if salary_max and salary_max != salary_min:
+                                    salary += f" - {currency_symbol}{float(salary_max):,.0f}"
 
                             description = item.get("description", "N/A")
-
                             job_id = item.get("id")
-                            job_url = (
-                                f"https://www.adzuna.com/details/{job_id}"
-                                if job_id else "N/A"
-                            )
+                            job_url = f"{base_url.split('/search')[0]}/details/{job_id}" if job_id else "N/A"
+                            
+                            # Often Adzuna JSON has created or posting_date
+                            posted_date = item.get("created", "N/A")
 
-                            jobs.append({
+                            page_jobs.append({
                                 "keyword": search_query,
                                 "title": title,
                                 "company": company,
                                 "location": job_location,
                                 "salary": salary,
                                 "job_type": "N/A",
+                                "posted_date": posted_date,
                                 "qualifications": [],
                                 "job_description": description,
                                 "job_url": job_url,
                                 "source": "Adzuna"
                             })
-
                         except Exception as e:
                             print(f"❌ Error parsing JSON job: {e}")
-
-                # ============================
-                # 🔁 DOM FALLBACK (UNCHANGED)
-                # ============================
                 else:
-                    print("⚠️ No az_wj_data found. Falling back to DOM scraping.")
+                    # DOM Fallback
+                    job_cards = page.locator("article[data-aid], .ui-job-card").all()
+                    print(f"⚠️ Falling back to DOM: Found {len(job_cards)} cards")
+                    for card in job_cards:
+                        try:
+                            title_el = card.locator("h2 a[data-js='jobLink'], h2 a").first
+                            title = title_el.inner_text().strip() if title_el.count() > 0 else "N/A"
+                            job_url = title_el.get_attribute("href") if title_el.count() > 0 else "N/A"
+                            if job_url and job_url.startswith("/"):
+                                job_url = base_url.split('/search')[0] + job_url
 
-                    try:
-                        page.wait_for_selector("article[data-aid]", timeout=10000)
-                        job_cards = page.query_selector_all("article[data-aid]")
+                            company = "N/A"
+                            company_el = card.locator(".ui-company, .job-card__company").first
+                            if company_el.count() > 0: company = company_el.inner_text().strip()
 
-                        if not job_cards:
-                            print("⛔ No DOM jobs found. Ending pagination.")
-                            break
+                            loc = "N/A"
+                            location_el = card.locator(".ui-location, .job-card__location").first
+                            if location_el.count() > 0: loc = location_el.inner_text().strip()
 
-                        for card in job_cards:
-                            try:
-                                title_el = card.query_selector("h2 a[data-js='jobLink']")
-                                title = title_el.inner_text().strip() if title_el else "N/A"
-                                job_url = title_el.get_attribute("href") if title_el else "N/A"
+                            salary = "N/A"
+                            salary_el = card.locator(".ui-salary, .job-card__salary").first
+                            if salary_el.count() > 0: salary = salary_el.inner_text().strip()
 
-                                company_el = card.query_selector(".ui-company")
-                                company = company_el.inner_text().strip() if company_el else "N/A"
+                            posted = "N/A"
+                            posted_el = card.locator(".ui-job-card__footer span, .job-card__posted-date").first
+                            if posted_el.count() > 0: posted = posted_el.inner_text().strip()
 
-                                location_el = card.query_selector(".ui-location")
-                                job_location = location_el.inner_text().strip() if location_el else "N/A"
+                            desc = "N/A"
+                            snippet_el = card.locator(".max-snippet-height, .job-card__description").first
+                            if snippet_el.count() > 0: desc = snippet_el.inner_text().strip()
 
-                                snippet_el = card.query_selector(".max-snippet-height")
-                                description = snippet_el.inner_text().strip() if snippet_el else "N/A"
+                            page_jobs.append({
+                                "keyword": search_query,
+                                "title": title,
+                                "company": company,
+                                "location": loc,
+                                "salary": salary,
+                                "job_type": "N/A",
+                                "posted_date": posted,
+                                "qualifications": [],
+                                "job_description": desc,
+                                "job_url": job_url,
+                                "source": "Adzuna"
+                            })
+                        except Exception as e:
+                            print(f"❌ Error parsing DOM card: {e}")
 
-                                jobs.append({
-                                    "keyword": search_query,
-                                    "title": title,
-                                    "company": company,
-                                    "location": job_location,
-                                    "salary": "N/A",
-                                    "job_type": "N/A",
-                                    "qualifications": [],
-                                    "job_description": description,
-                                    "job_url": job_url,
-                                    "source": "Adzuna"
-                                })
-
-                            except Exception as e:
-                                print(f"❌ Error parsing DOM card: {e}")
-
-                    except Exception as e:
-                        print(f"❌ DOM fallback failed: {e}")
-                        break
-
-                page_number += 1
-                page.wait_for_timeout(1500)
+                if not page_jobs:
+                    break
+                
+                jobs.extend(page_jobs)
+                current_page += 1
+                time.sleep(2)
 
             # ============================
             # 🔍 JOB DETAIL ENRICHMENT (UNCHANGED)
@@ -191,8 +185,21 @@ def scrape_adzuna_jobs(search_query: str, location: str = None):
                             job["salary"] = js_details.get("salary", job["salary"])
                             job["company"] = js_details.get("company", job["company"])
                             job["location"] = js_details.get("location", job["location"])
+                            if "posted_at" in js_details:
+                                job["posted_date"] = js_details["posted_at"]
                     except:
                         pass
+
+                    # Qualifications Extraction
+                    quals = []
+                    # Try looking for list items in standard sections
+                    for sel in page.query_selector_all(".adp-body li, .job-details li"):
+                        txt = sel.inner_text().strip()
+                        if len(txt) > 3 and len(txt) < 100:
+                            quals.append(txt)
+                    
+                    if quals:
+                        job["qualifications"] = quals[:15] # Limit to top 15
 
                     # Job type extraction
                     types = []
