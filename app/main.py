@@ -78,20 +78,37 @@ async def scrape_adzuna(
 async def scrape_ziprecruiter(
     query: str = Query(..., example="React Developer"),
     location: Optional[str] = Query(None, example="India"),
-    max_pages: int = Query(1, example=1, description="Number of pages to scrape")
+    pages: int = Query(5, example=5, description="Number of pages to scrape")
     ):
-    jobs = await asyncio.to_thread(scrape_ziprecruiter_jobs, query, location, max_pages)
+    jobs = await asyncio.to_thread(scrape_ziprecruiter_jobs, query, location, pages)
 
+    saved_count = 0
     if jobs:
-        await ziprecruiter_collection.insert_many(jobs)
+        # Use upsert to avoid duplicates based on job_url
+        for job in jobs:
+            if "job_url" in job and job["job_url"]:
+                result = await ziprecruiter_collection.update_one(
+                    {"job_url": job["job_url"]},
+                    {"$set": job},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                # If no URL, just insert
+                await ziprecruiter_collection.insert_one(job)
+                saved_count += 1
+
         # Convert ObjectId to string for JSON serialization
         for job in jobs:
-            job["_id"] = str(job["_id"])
+            if "_id" in job:
+                job["_id"] = str(job["_id"])
 
     return {
         "query": query,
         "location": location,
         "total_jobs_scraped": len(jobs),
+        "new_or_updated_jobs": saved_count,
         "status": "success",
         "data": jobs
     }
