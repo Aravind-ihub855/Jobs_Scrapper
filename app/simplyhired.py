@@ -4,11 +4,14 @@ from urllib.parse import quote_plus
 
 BASE_URL = "https://www.simplyhired.co.in/search?q={query}"
 
-def scrape_simplyhired_jobs(search_query: str, location: str = None, max_pages: int = 5):
+def scrape_simplyhired_jobs(search_query: str, location: str = None, max_pages: int = 5, freshness: int = None):
     encoded_query = quote_plus(search_query)
     url = BASE_URL.format(query=encoded_query)
     if location:
         url += f"&l={quote_plus(location)}"
+    
+    if freshness:
+        url += f"&t={freshness}"
 
     jobs = []
 

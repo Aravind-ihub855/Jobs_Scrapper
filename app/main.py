@@ -32,11 +32,22 @@ executor = ProcessPoolExecutor(max_workers=2)
 async def scrape_simplyhired(
     query: str = Query(..., example="Python Developer"),
     location: Optional[str] = Query(None, example="Bengaluru"),
-    pages: int = Query(5, example=5, description="Number of pages to scrape")
+    pages: int = Query(5, example=5, description="Number of pages to scrape"),
+    freshness: Optional[str] = Query(None, enum=["Last 24 hours", "7 days", "14 days", "30 days"], description="Filter by date added")
     ):
+    
+    # Map user-friendly labels to internal values (t)
+    freshness_map = {
+        "Last 24 hours": 1,
+        "7 days": 7,
+        "14 days": 14,
+        "30 days": 30
+    }
+    mapped_freshness = freshness_map.get(freshness) if freshness else None
+
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
-    jobs = await loop.run_in_executor(executor, scrape_simplyhired_jobs, query, location, pages)
+    jobs = await loop.run_in_executor(executor, scrape_simplyhired_jobs, query, location, pages, mapped_freshness)
 
     saved_count = 0
     if jobs:
