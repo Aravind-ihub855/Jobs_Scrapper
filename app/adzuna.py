@@ -7,7 +7,7 @@ BASE_URL_COM = "https://www.adzuna.com/search?q={query}"
 BASE_URL_IN = "https://www.adzuna.in/search?q={query}"
 
 
-def scrape_adzuna_jobs(search_query: str, location: str = None, max_pages: int = 5):
+def scrape_adzuna_jobs(search_query: str, location: str = None, max_pages: int = 5, freshness: int = None):
     encoded_query = quote_plus(search_query)
 
     # Smart domain selection: default to .in if location is Indian or user specifies India
@@ -29,6 +29,9 @@ def scrape_adzuna_jobs(search_query: str, location: str = None, max_pages: int =
     url = base_url.format(query=encoded_query)
     if location:
         url += f"&w={quote_plus(location)}"
+    
+    if freshness:
+        url += f"&f={freshness}"
 
     jobs = []
     currency_symbol = "₹" if is_india else "$"

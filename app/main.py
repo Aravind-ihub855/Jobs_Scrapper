@@ -84,11 +84,21 @@ async def scrape_simplyhired(
 async def scrape_adzuna(
     query: str = Query(..., example="Java Developer"),
     location: str = Query(None, example="Bengaluru"),
-    pages: int = Query(5, example=5, description="Number of pages to scrape")
+    pages: int = Query(5, example=5, description="Number of pages to scrape"),
+    freshness: Optional[str] = Query(None, enum=["Last 24 hours", "Last 3 days", "Last 7 days"], description="Filter by date posted")
     ):
+    
+    # Map user-friendly labels to internal values (f)
+    freshness_map = {
+        "Last 24 hours": 1,
+        "Last 3 days": 3,
+        "Last 7 days": 7
+    }
+    mapped_freshness = freshness_map.get(freshness) if freshness else None
+
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
-    jobs = await loop.run_in_executor(executor, scrape_adzuna_jobs, query, location, pages)
+    jobs = await loop.run_in_executor(executor, scrape_adzuna_jobs, query, location, pages, mapped_freshness)
     
     saved_count = 0
     if jobs:
