@@ -14,7 +14,8 @@ from app.hackerrank import scrape_hackerrank_questions
 from app.codechef import scrape_codechef_questions
 from app.prepinsta import scrape_prepinsta_questions
 from app.interviewbit import scrape_interviewbit_questions
-from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection, exercism_collection, hackerrank_collection,codechef_collection,prepinsta_collection, interviewbit_collection
+from app.indeed import scrape_indeed_jobs
+from app.database import simplyhired_collection, adzuna_collection, whatjobs_collection, naukri_collection, ziprecruiter_collection, monster_collection, leetcode_collection, gfg_collection, exercism_collection, hackerrank_collection,codechef_collection,prepinsta_collection, interviewbit_collection, indeed_collection
 from motor.motor_asyncio import AsyncIOMotorCollection
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
@@ -64,6 +65,57 @@ async def scrape_simplyhired(
             else:
                 # If no URL, just insert
                 await simplyhired_collection.insert_one(job)
+                saved_count += 1
+
+        # Convert ObjectId to string for JSON serialization
+        for job in jobs:
+            if "_id" in job:
+                job["_id"] = str(job["_id"])
+
+    return {
+        "query": query,
+        "location": location,
+        "total_jobs_scraped": len(jobs),
+        "new_or_updated_jobs": saved_count,
+        "status": "success",
+        "data": jobs
+    }
+
+@app.get("/scrape/indeed")
+async def scrape_indeed(
+    query: str = Query(..., example="Python Developer"),
+    location: Optional[str] = Query(None, example="Coimbatore"),
+    pages: int = Query(2, example=2, description="Number of pages to scrape"),
+    freshness: Optional[str] = Query(None, enum=["Last 24 hours", "Last 3 days", "Last 7 days", "Last 14 days"], description="Filter by date posted")
+    ):
+    
+    # Map user-friendly labels to internal values (fromage)
+    freshness_map = {
+        "Last 24 hours": 1,
+        "Last 3 days": 3,
+        "Last 7 days": 7,
+        "Last 14 days": 14
+    }
+    mapped_freshness = freshness_map.get(freshness) if freshness else None
+
+    # Run the synchronous blocking scraper in a process pool
+    loop = asyncio.get_event_loop()
+    jobs = await loop.run_in_executor(executor, scrape_indeed_jobs, query, location, pages, mapped_freshness)
+    
+    saved_count = 0
+    if jobs:
+        # Use upsert to avoid duplicates based on job_url
+        for job in jobs:
+            if "job_url" in job and job["job_url"]:
+                result = await indeed_collection.update_one(
+                    {"job_url": job["job_url"]},
+                    {"$set": job},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                await indeed_collection.insert_one(job)
                 saved_count += 1
 
         # Convert ObjectId to string for JSON serialization
