@@ -138,8 +138,7 @@ class ZipRecruiterScraper:
             "posted_date": "N/A",
             "job_type": "N/A",
             "salary": "N/A",
-            "url": url,
-            "qualifications": []
+            "url": url
         }
         
         try:
@@ -180,17 +179,6 @@ class ZipRecruiterScraper:
             if desc_el:
                 # Get the full text, preserving some structure with newlines if possible
                 job['description'] = desc_el.inner_text().strip()
-                
-                # Try to extract requirements/qualifications from the text roughly
-                if "Requirements:" in job['description']:
-                    try:
-                        parts = job['description'].split("Requirements:")
-                        if len(parts) > 1:
-                            req_block = parts[1].split("\n")
-                            # Take first few bullets
-                            job['qualifications'] = [line.strip("- •") for line in req_block[:5] if len(line.strip()) > 5]
-                    except:
-                        pass
             
             # 7. Apply URL (if external)
             apply_btn = page.query_selector("a.external_apply")
@@ -221,7 +209,7 @@ def scrape_ziprecruiter_jobs(query, location="India", max_pages=1):
                 "location": j.get('location'),
                 "salary": j.get('salary'),
                 "job_type": j.get('job_type'),
-                "qualifications": j.get('qualifications'),
+                "posted_date": j.get('posted_date'),
                 "job_description": j.get('description'),
                 "job_url": j.get('url'),
                 "source": "ZipRecruiter"
