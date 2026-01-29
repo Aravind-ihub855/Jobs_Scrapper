@@ -361,8 +361,22 @@ async def scrape_leetcode(
     loop = asyncio.get_event_loop()
     questions = await loop.run_in_executor(executor, scrape_leetcode_questions, query)
     
+    saved_count = 0
     if questions:
-        await leetcode_collection.insert_many(questions)
+        # Use upsert to avoid duplicates based on url
+        for question in questions:
+            if "url" in question and question["url"]:
+                result = await leetcode_collection.update_one(
+                    {"url": question["url"]},
+                    {"$set": question},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                await leetcode_collection.insert_one(question)
+                saved_count += 1
+        
         # Convert ObjectId to string for JSON serialization
         for q in questions:
             if "_id" in q:
@@ -371,6 +385,7 @@ async def scrape_leetcode(
     return {
         "query": query,
         "total_questions_scraped": len(questions),
+        "new_or_updated_questions": saved_count,
         "status": "success",
         "data": questions
     }
