@@ -36,65 +36,132 @@ def scrape_interviewbit_questions(query: str, limit: int = 5):
             print(f"[InterviewBit] Navigating to {url}")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             
-            # 2. Locate Coding Problems section
-            print("[InterviewBit] Looking for 'Coding Problems' section...")
+            # 2. Navigate to search for more problems (prioritize search for topics/tags)
             try:
-                # Click "Coding Problems" to ensure it's open
-                try:
-                    coding_problems_header = page.locator("text=Coding Problems")
-                    if coding_problems_header.is_visible(timeout=5000):
-                        coding_problems_header.scroll_into_view_if_needed()
-                        coding_problems_header.click()
-                        print("[InterviewBit] Clicked 'Coding Problems'")
-                        time.sleep(1)
-                except:
-                    pass
-
-                # Expand all sub-categories to ensure all links are rendered
-                categories = ["Easy Problems", "Medium Problems", "Hard Problems", "Intermediate Problems", "Advanced Problems"]
-                for cat in categories:
-                    try:
-                        header = page.locator(f"text={cat}")
-                        if header.count() > 0 and header.first.is_visible():
-                            header.first.click(timeout=2000)
-                            print(f"[InterviewBit] Clicked '{cat}'")
-                            time.sleep(1)
-                    except:
-                        pass
+                search_url = f"https://www.interviewbit.com/search/?q={query}"
+                print(f"[InterviewBit] Navigating to search URL for rich metadata: {search_url}")
+                page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
                 
-                # Wait for at least some problem links
-                page.wait_for_selector('a[href*="/problems/"]', timeout=5000)
+                # Check if we landed on search or redirect
+                if "/search/" not in page.url:
+                    # Try to find a link if redirect happened to landing page
+                    view_all_link = page.locator("a:has-text('View All Problems')").first
+                    if view_all_link.count() > 0 and view_all_link.is_visible(timeout=5000):
+                        print("[InterviewBit] Redirected. Clicking 'View All Problems'...")
+                        view_all_link.click()
+                        page.wait_for_load_state("domcontentloaded")
                 
+                time.sleep(2)
             except Exception as e:
-                print(f"[InterviewBit] formatting/interaction check failed: {e}. Trying to extract links anyway.")
+                print(f"[InterviewBit] Navigation to search list failed: {e}. Trying landing page fallback.")
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-            
-            # Find all problem links.
+            # 3. Locate Coding Problems / Search results
             print("[InterviewBit] extracting problem links...")
             
-            # This selector seeks anchor tags pointing to /problems/
-            # We explicitly ignore "solve" buttons if they exist and just get the main link
+            # This logic works for both the landing page and the search results page (accordions)
             problem_links = page.evaluate("""() => {
-                const links = Array.from(document.querySelectorAll('a[href*="/problems/"]'));
-                return links.map(a => ({
-                    title: a.innerText.trim(),
-                    url: a.href
-                })).filter(item => item.title && !item.url.includes('/solve')); 
+                const results = [];
+                
+                // 1. Check for standard landing page links
+                const landingDivs = Array.from(document.querySelectorAll('.problem-tile, .article-problems__list-tile, #problem-widget-tile'));
+                landingDivs.forEach(div => {
+                    const a = div.querySelector('a') || (div.tagName === 'A' ? div : null);
+                    if (!a || !a.href || a.href.includes('/solve')) return;
+                    
+                    const url = a.href;
+                    // Robust Title extraction: clone and strip junk labels/tags
+                    const clone = a.cloneNode(true);
+                    const junk = clone.querySelectorAll('.label, .tag, .company-tag, span, i');
+                    junk.forEach(el => el.remove());
+                    const title = clone.innerText.trim() || clone.textContent.trim() || "Coding Problem";
+                    
+                    // Try to finding topic from parent section
+                    let topic = "";
+                    const section = div.closest('section, .article-problems__list, .article-problems');
+                    if (section) {
+                        const header = section.querySelector('h2, h3, .section-title');
+                        if (header) topic = header.innerText.trim();
+                    }
+
+                    if (url && !results.some(r => r.url === url)) {
+                        results.push({ title, url, topic, search_tags: [] });
+                    }
+                });
+
+                // 2. Check for Search Page structure (accordions + "Go To Problem" buttons)
+                const panels = Array.from(document.querySelectorAll('.panel-group, .panel, .panel-default'));
+                panels.forEach(panel => {
+                    const btn = panel.querySelector('a[href*="/problems/"]');
+                    if (!btn || !btn.innerText.includes('Go To Problem')) return;
+
+                    const url = btn.href;
+                    
+                    // Extract Title from header - exclude tags/labels via cloning
+                    const header = panel.querySelector('.panel-heading, h3, a[data-toggle="collapse"]');
+                    let title = "Coding Problem";
+                    if (header) {
+                        const clone = header.cloneNode(true);
+                        const junk = clone.querySelectorAll('.label, .tag, .company-tag, span, i');
+                        junk.forEach(el => el.remove());
+                        title = clone.innerText.trim() || clone.textContent.trim() || "Coding Problem";
+                    }
+                    
+                    // Extract Topic/Category from the preceding h3 on search page
+                    let topic = "";
+                    const parent = panel.closest('.panel-group, #accordion');
+                    let prev = parent ? parent.previousElementSibling : panel.previousElementSibling;
+                    
+                    while (prev) {
+                        if (['H1', 'H2', 'H3', 'H4'].includes(prev.tagName)) {
+                            topic = prev.innerText.trim();
+                            break;
+                        }
+                        const heading = prev.querySelector('h1, h2, h3, h4');
+                        if (heading) {
+                            topic = heading.innerText.trim();
+                            break;
+                        }
+                        prev = prev.previousElementSibling;
+                    }
+
+                    // Extract Tags (company labels next to title)
+                    const tags = Array.from(panel.querySelectorAll('.label, .tag, .company-tag'))
+                                      .map(t => t.innerText.trim())
+                                      .filter(t => {
+                                          const low = t.toLowerCase();
+                                          const ignore = ["easy", "medium", "hard", "solved", "unsolved", "desktop", "smiley", "auth", "scaler", "submission"];
+                                          return t && !ignore.some(x => low.includes(x)) && t.length < 30;
+                                      });
+
+                    if (url && !results.some(r => r.url === url)) {
+                        results.push({ title, url, topic, search_tags: tags });
+                    }
+                });
+
+                return results;
             }""")
             
-            # Filter out duplicates
+            # Filter out duplicates and ensure URL is valid
             unique_problems = {}
             for item in problem_links:
-                if "/problems/" in item['url']:
-                    unique_problems[item['url']] = item['title']
+                if "/problems/" in item['url'] and item['title']:
+                    unique_problems[item['url']] = item
             
             print(f"[InterviewBit] Found {len(unique_problems)} unique problems.")
             
             count = 0
-            for problem_url, problem_title in unique_problems.items():
+            for problem_url, info in unique_problems.items():
+                problem_title = info['title']
+                search_topic = info.get('topic', "Coding Problem")
+                search_tags = info.get('search_tags', [])
                 if count >= limit:
                     break
                 
+                # Avoid duplicates in the list if URL appears again in the same run
+                if any(q['url'] == problem_url for q in scraped_data):
+                    continue
+
                 print(f"[InterviewBit] Scraping problem: {problem_title}")
                 
                 try:
@@ -171,12 +238,70 @@ def scrape_interviewbit_questions(query: str, limit: int = 5):
                         "url": problem_url,
                         "platform": "InterviewBit",
                         "company": query,
+                        "topic": search_topic,
                         "description": "",
                         "constraints": "",
                         "input_format": "",
                         "output_format": "",
+                        "difficulty": "",
+                        "success_rate": "",
+                        "asked_in": search_tags,
                         "examples": []
                     }
+
+                    # Extract Success Rate and Difficulty from the header area
+                    try:
+                        # Use JS to find Success Rate reliably
+                        stats = problem_page.evaluate("""() => {
+                            const spans = Array.from(document.querySelectorAll('span, div, p'));
+                            const successMatch = spans.find(s => /\\d+\\.?\\d*% Success/.test(s.innerText));
+                            const difficultyTags = document.querySelectorAll('span[class*="DifficultyTag"], .c-difficulty-tag');
+                            
+                            let difficulty = "";
+                            if (difficultyTags.length > 0) {
+                                difficulty = difficultyTags[0].innerText.trim();
+                            } else {
+                                const dMatch = spans.find(s => ["Easy", "Medium", "Hard"].includes(s.innerText.trim()));
+                                if (dMatch) difficulty = dMatch.innerText.trim();
+                            }
+
+                            return {
+                                success: successMatch ? successMatch.innerText.trim() : "",
+                                difficulty: difficulty
+                            };
+                        }""")
+                        problem_data["success_rate"] = stats["success"]
+                        if stats["difficulty"]:
+                            problem_data["difficulty"] = stats["difficulty"]
+                    except:
+                        pass
+                    
+                    # Extract "Asked In" companies from logos and merge with search tags
+                    try:
+                        companies = list(search_tags)
+                        # Selector for the "Asked In" container images
+                        asked_in_section = problem_page.locator("div:has-text('Asked In:'), .asked-in-logo").first
+                        if asked_in_section.count() > 0:
+                            imgs = asked_in_section.locator("img")
+                            for i in range(imgs.count()):
+                                img = imgs.nth(i)
+                                name = img.get_attribute("title") or img.get_attribute("alt")
+                                if not name:
+                                    src = img.get_attribute("src")
+                                    if src:
+                                        match = re.search(r'/([^/.]+)\.(svg|png|jpg)', src)
+                                        if match: name = match.group(1).title()
+                                
+                                if name:
+                                    clean_name = name.replace(" logo", "").replace("-", " ").strip().lower()
+                                    # Filter out non-company logos
+                                    ignore_list = ["auth", "scaler", "superman", "icon", "vector", "logo", "desktop", "smiley", "submission", "interviewbit"]
+                                    if not any(x in clean_name for x in ignore_list):
+                                        companies.append(name.replace(" logo", "").strip())
+                        
+                        problem_data["asked_in"] = list(set(companies))
+                    except:
+                        pass
                     
                     # Pre-process superscripts to verify readability (e.g., 10^5 instead of 105)
                     try:
@@ -248,6 +373,9 @@ def scrape_interviewbit_questions(query: str, limit: int = 5):
                         if example['input'] or example['output']:
                             problem_data['examples'].append(example)
 
+                    if any(item['url'] == problem_url for item in scraped_data):
+                        continue
+                        
                     scraped_data.append(problem_data)
                     count += 1
                     problem_page.close()
