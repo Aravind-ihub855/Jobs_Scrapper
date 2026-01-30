@@ -400,14 +400,24 @@ async def scrape_gfg(
     loop = asyncio.get_event_loop()
     questions = await loop.run_in_executor(executor, scrape_gfg_questions, query, pages, company)
     
+    saved_count = 0
     if questions:
-        # Save to database in the main process
+        # Use upsert to avoid duplicates based on url
         for q in questions:
-            await gfg_collection.update_one(
-                {"url": q["url"]},
-                {"$set": q},
-                upsert=True
-            )
+            if "url" in q and q["url"]:
+                result = await gfg_collection.update_one(
+                    {"url": q["url"]},
+                    {"$set": q},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                await gfg_collection.insert_one(q)
+                saved_count += 1
+        
+        # Convert ObjectId to string for JSON serialization
+        for q in questions:
             if "_id" in q:
                 q["_id"] = str(q["_id"])
 
@@ -416,6 +426,7 @@ async def scrape_gfg(
         "company": company,
         "pages": pages,
         "total_questions_scraped": len(questions),
+        "new_or_updated_questions": saved_count,
         "status": "success",
         "data": questions
     }

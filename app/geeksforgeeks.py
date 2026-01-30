@@ -183,7 +183,6 @@ def scrape_gfg_questions(search_query: str, pages: int = 1, company: str = None)
                     title = prob.get("problem_name", "")
                     # Construct reliable URL
                     problem_url = f"https://www.geeksforgeeks.org/problems/{slug}/1"
-                    
                     scraped_data.append({
                         "title": clean_text(title),
                         "url": problem_url,
@@ -206,7 +205,6 @@ def scrape_gfg_questions(search_query: str, pages: int = 1, company: str = None)
                 print(f"[GFG Detail] Scraping details for: {item['title']}")
                 detail_page = context.new_page()
                 
-                # Navigate and wait for content
                 detail_page.goto(item["url"], wait_until="domcontentloaded", timeout=60000)
                 
                 # Check for "Oops" error or empty page
@@ -227,31 +225,41 @@ def scrape_gfg_questions(search_query: str, pages: int = 1, company: str = None)
                 # Scroll to trigger any lazy loads
                 detail_page.evaluate("window.scrollBy(0, 400)")
                 time.sleep(1)
-
-                # Expand tags if possible
-                expand_btns = detail_page.query_selector_all('div[class*="problems_tag_dropdown"]')
-                for btn in expand_btns:
-                    try:
-                        btn.click(timeout=1000)
-                    except:
-                        pass
                 
                 content_el = detail_page.query_selector('div[class*="problems_problem_content"]')
-                description_text = content_el.inner_text().strip() if content_el else ""
+                
+                # Extract content with superscript handling for constraints
+                detail_data = detail_page.evaluate("""
+                    () => {
+                        const contentDiv = document.querySelector('div[class*="problems_problem_content"]');
+                        if (!contentDiv) return { description_text: "", constraints_html: "" };
+                        
+                        // Helper function to convert superscript to caret notation
+                        const convertSupToCaretNotation = (element) => {
+                            const clone = element.cloneNode(true);
+                            const sups = clone.querySelectorAll('sup');
+                            sups.forEach(sup => {
+                                const text = sup.textContent;
+                                sup.replaceWith(`^${text}`);
+                            });
+                            return clone.innerText.trim();
+                        };
+                        
+                        return {
+                            description_text: convertSupToCaretNotation(contentDiv),
+                            constraints_html: contentDiv.innerHTML
+                        };
+                    }
+                """)
+                
+                description_text = detail_data.get("description_text", "") if detail_data else ""
                 
                 # Parse structured content
                 structured_content = parse_problem_content(description_text)
                 
                 extra = detail_page.evaluate("""
                     () => {
-                        const result = { company_tags: [], topic_tags: [], complexity: "" };
-                        const tags = Array.from(document.querySelectorAll('a[class*="problems_tag_label"]'));
-                        tags.forEach(tag => {
-                            const p = tag.closest('div');
-                            const sText = p ? (p.parentElement ? p.parentElement.innerText : "") : "";
-                            if (sText.includes('Company')) result.company_tags.push(tag.innerText.trim());
-                            else if (sText.includes('Topic')) result.topic_tags.push(tag.innerText.trim());
-                        });
+                        const result = { complexity: "" };
                         const strongs = Array.from(document.querySelectorAll('strong'));
                         const ch = strongs.find(s => s.innerText.includes('Expected'));
                         if (ch) result.complexity = ch.parentElement.innerText.trim();
@@ -265,9 +273,7 @@ def scrape_gfg_questions(search_query: str, pages: int = 1, company: str = None)
                     "constraints": structured_content["constraints"],
                     "your_task": structured_content["your_task"],
                     "expected_time_complexity": structured_content["expected_time_complexity"] or clean_text(extra["complexity"]),
-                    "expected_aux_space": structured_content["expected_aux_space"],
-                    "company_tags": list(set(extra["company_tags"])),
-                    "topic_tags": list(set(extra["topic_tags"]))
+                    "expected_aux_space": structured_content["expected_aux_space"]
                 })
                 
                 detail_page.close()
