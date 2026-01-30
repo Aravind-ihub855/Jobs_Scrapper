@@ -440,14 +440,22 @@ async def scrape_exercism(
     loop = asyncio.get_event_loop()
     exercises = await loop.run_in_executor(executor, scrape_exercism_questions, language, pages)
     
+    saved_count = 0
     if exercises:
         # Save to database in the main process
         for ex in exercises:
-            await exercism_collection.update_one(
-                {"url": ex["url"]},
-                {"$set": ex},
-                upsert=True
-            )
+            if "url" in ex and ex["url"]:
+                result = await exercism_collection.update_one(
+                    {"url": ex["url"]},
+                    {"$set": ex},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                await exercism_collection.insert_one(ex)
+                saved_count += 1
+
             if "_id" in ex:
                 ex["_id"] = str(ex["_id"])
 
@@ -455,6 +463,7 @@ async def scrape_exercism(
         "language": language,
         "pages": pages,
         "total_exercises_scraped": len(exercises),
+        "new_or_updated_questions": saved_count,
         "status": "success",
         "data": exercises
     }

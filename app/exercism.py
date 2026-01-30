@@ -49,6 +49,11 @@ def scrape_exercism_questions(language: str, pages: int = 1):
                 
                 # Construct full URL
                 full_url = f"https://exercism.org{href}"
+                
+                # Avoid duplicates in the list
+                if any(item['url'] == full_url for item in scraped_data):
+                    continue
+
                 slug = href.split('/')[-1]
                 
                 title_el = card.query_selector('.--title')
