@@ -501,27 +501,38 @@ async def scrape_hackerrank(
 
 @app.get("/scrape/codechef")
 async def scrape_codechef(
-    tag: str = Query(..., example="permutation-cycles"),
-    pages: int = Query(1, example=1)
+    tag: Optional[str] = Query(None, example="permutation-cycles"),
+    topic: Optional[str] = Query(None, example="sorting"),
+    pages: int = Query(0, example=0, description="Number of pages to scrape (0 for all)")
     ):
     # Run the synchronous blocking scraper in a process pool
     loop = asyncio.get_event_loop()
-    questions = await loop.run_in_executor(executor, scrape_codechef_questions, tag, pages)
+    questions = await loop.run_in_executor(executor, scrape_codechef_questions, tag, topic, pages)
     
+    saved_count = 0
     if questions:
         for q in questions:
-            await codechef_collection.update_one(
-                {"url": q["url"]},
-                {"$set": q},
-                upsert=True
-            )
+            if "url" in q and q["url"]:
+                result = await codechef_collection.update_one(
+                    {"url": q["url"]},
+                    {"$set": q},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                await codechef_collection.insert_one(q)
+                saved_count += 1
+            
             if "_id" in q:
                 q["_id"] = str(q["_id"])
                 
     return {
         "tag": tag,
+        "topic": topic,
         "pages": pages,
         "total_questions_scraped": len(questions),
+        "new_or_updated_questions": saved_count,
         "status": "success",
         "data": questions
     }

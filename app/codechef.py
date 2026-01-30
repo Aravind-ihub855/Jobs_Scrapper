@@ -8,13 +8,20 @@ def clean_text(text: str) -> str:
         return ""
     return re.sub(r'\s+', ' ', text).strip()
 
-def scrape_codechef_questions(tag: str, pages: int = 1):
+def scrape_codechef_questions(tag: str = None, topic: str = None, pages: int = 1):
     """
-    Scrapes CodeChef questions for a specific tag using Playwright.
+    Scrapes CodeChef questions for a specific tag or topic using Playwright.
     """
     scraped_data = []
     base_url = "https://www.codechef.com"
-    list_url = f"{base_url}/practice-old/tags/{tag}"
+    
+    if topic:
+        list_url = f"{base_url}/practice-old/topics/{topic}"
+    elif tag:
+        list_url = f"{base_url}/practice-old/tags/{tag}"
+    else:
+        print("[CodeChef List] Error: No tag or topic provided.")
+        return []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
@@ -28,49 +35,141 @@ def scrape_codechef_questions(tag: str, pages: int = 1):
         try:
             page.goto(list_url, wait_until="networkidle", timeout=60000)
             
-            # Wait for the table to load
-            page.wait_for_selector('table.MuiTable-root', timeout=20000)
-            
-            # Extract problems from the table
-            # The table rows are usually in tbody tr
-            rows = page.query_selector_all('tbody.MuiTableBody-root tr')
-            print(f"[CodeChef List] Found {len(rows)} potential problems on page.")
+            # Detection of total pages if pages=0 or for logging
+            total_pages = pages
+            try:
+                # Look for text like "1-20 of 224"
+                pagination_text_el = page.query_selector('p[class*="MuiTablePagination-displayedRows"]')
+                if pagination_text_el:
+                    pagination_text = pagination_text_el.inner_text()
+                    # Extract 224 from "1-20 of 224"
+                    total_match = re.search(r'of\s+(\d+)', pagination_text)
+                    if total_match:
+                        total_items = int(total_match.group(1))
+                        # Assuming 20 rows per page (default)
+                        total_pages_detected = (total_items + 19) // 20
+                        print(f"[CodeChef List] Detected {total_items} items across {total_pages_detected} pages.")
+                        if pages == 0:
+                            total_pages = total_pages_detected
+            except Exception as pe:
+                print(f"[CodeChef List] Could not detect total pages: {pe}")
 
-            for i, row in enumerate(rows):
-                try:
-                    # Column 0: Code (e.g., MISINTER)
-                    # Column 1: Name (e.g., Misinterpretation)
-                    # Column 3: Difficulty (e.g., 1632)
-                    
-                    code_el = row.query_selector('td:nth-child(1)')
-                    if not code_el:
+            # If pages is still 0 (and detection failed), we'll just loop indefinitely until next is disabled
+            max_loop = total_pages if total_pages > 0 else 9999 
+
+            for current_page_num in range(1, max_loop + 1):
+                print(f"[CodeChef List] Scraping page {current_page_num}...")
+                
+                # Wait for the table to load
+                page.wait_for_selector('table.MuiTable-root', timeout=20000)
+                
+                # Extract problems from the table
+                rows = page.query_selector_all('tbody.MuiTableBody-root tr')
+                print(f"[CodeChef List] Found {len(rows)} potential problems on page {current_page_num}.")
+
+                for i, row in enumerate(rows):
+                    try:
+                        row_text = row.inner_text().lower()
+                        if "becoming the best coder" in row_text:
+                            continue
+
+                        code_el = row.query_selector('td:nth-child(1)')
+                        if not code_el:
+                            continue
+                        code = code_el.inner_text().strip()
+                        
+                        if not code:
+                            continue
+
+                        # Construct URL
+                        problem_url = f"{base_url}/problems/{code}"
+                        
+                        # Avoid duplicates in the list
+                        if any(item['url'] == problem_url for item in scraped_data):
+                            continue
+
+                        name_el = row.query_selector('td:nth-child(2)')
+                        title = name_el.inner_text().strip() if name_el else code
+                        
+                        diff_el = row.query_selector('td:nth-child(4)')
+                        difficulty = diff_el.inner_text().strip() if diff_el else "0"
+
+                        scraped_data.append({
+                            "title": title,
+                            "url": problem_url,
+                            "difficulty": difficulty,
+                            "tag": tag,
+                            "topic": topic,
+                            "platform": "CodeChef"
+                        })
+                    except Exception as e:
+                        print(f"[CodeChef List] Error extracting row: {e}")
                         continue
-                    code = code_el.inner_text().strip()
-                    
-                    if not code:
-                        continue
 
-                    # Construct URL
-                    problem_url = f"{base_url}/problems/{code}"
-                    
-                    name_el = row.query_selector('td:nth-child(2)')
-                    title = name_el.inner_text().strip() if name_el else code
-                    
-                    # Difficulty is in 4th column (index 3 if 0-indexed, but nth-child is 1-indexed)
-                    # The HTML shows data-colindex="3" which is the 4th column.
-                    diff_el = row.query_selector('td:nth-child(4)')
-                    difficulty = diff_el.inner_text().strip() if diff_el else "0"
+                # Pagination logic: Check if we need more pages and if a next button exists
+                if pages == 0 or current_page_num < pages:
+                    # Get the current first problem code to verify change after click
+                    first_code_before = None
+                    try:
+                        first_row = page.query_selector('tbody.MuiTableBody-root tr')
+                        if first_row:
+                            code_el = first_row.query_selector('td:nth-child(1)')
+                            if code_el:
+                                first_code_before = code_el.inner_text().strip()
+                    except:
+                        pass
 
-                    scraped_data.append({
-                        "title": title,
-                        "url": problem_url,
-                        "difficulty": difficulty,
-                        "tag": tag,
-                        "platform": "CodeChef"
-                    })
-                except Exception as e:
-                    print(f"[CodeChef List] Error extracting row: {e}")
-                    continue
+                    # Try multiple selectors for the next button
+                    next_button = None
+                    next_selectors = [
+                        'button:has(svg[data-testid="KeyboardArrowRightIcon"])',
+                        'button:has(svg[data-testid="NavigateNextIcon"])',
+                        'button[aria-label="Next page"]',
+                        'button[aria-label="Go to next page"]',
+                        'nav[aria-label="pagination navigation"] button:has(svg[data-testid="KeyboardArrowRightIcon"])',
+                        'nav[aria-label="pagination navigation"] button:has(svg[data-testid="NavigateNextIcon"])',
+                        'button[aria-label*="next" i]',
+                        'button[aria-label*="Next" i]'
+                    ]
+                    
+                    for sel in next_selectors:
+                        next_button = page.query_selector(sel)
+                        if next_button:
+                            break
+                    
+                    # Check if button is disabled (MUI uses both 'disabled' attribute and 'Mui-disabled' class)
+                    is_disabled = page.evaluate("""(btn) => {
+                        if (!btn) return true;
+                        return btn.disabled || btn.classList.contains('Mui-disabled') || btn.getAttribute('aria-disabled') === 'true';
+                    }""", next_button)
+                    
+                    if next_button and not is_disabled:
+                        print(f"[CodeChef List] Clicking next page (after page {current_page_num})...")
+                        
+                        # Scroll into view to ensure it's clickable
+                        next_button.scroll_into_view_if_needed()
+                        next_button.click()
+                        
+                        # Wait for the first code to change, indicating a new page has loaded
+                        if first_code_before:
+                            try:
+                                page.wait_for_function(
+                                    f"() => {{ \
+                                        const el = document.querySelector('tbody.MuiTableBody-root tr td:nth-child(1)'); \
+                                        return el && el.innerText.trim() !== '{first_code_before}'; \
+                                }}", timeout=15000
+                                )
+                                print(f"[CodeChef List] Page {current_page_num + 1} transition detected. Waiting for stability...")
+                                # Additional sleep to ensure all rows are rendered
+                                time.sleep(2)
+                            except:
+                                print(f"[CodeChef List] Timeout waiting for page {current_page_num + 1} to load, continuing...")
+                                time.sleep(3)
+                        else:
+                            time.sleep(4) 
+                    else:
+                        print("[CodeChef List] No more pages available or Next button disabled.")
+                        break
 
         except Exception as e:
             print(f"[CodeChef List] Error on list page: {e}")
@@ -103,13 +202,28 @@ def scrape_codechef_questions(tag: str, pages: int = 1):
                         detail_page.close()
                         continue
 
-                raw_text = content_el.inner_text() if content_el else ""
+                # Use evaluate to get text and handle superscripts
+                raw_text = detail_page.evaluate("""
+                    () => {
+                        const contentEl = document.querySelector('div#problem-statement') || 
+                                          document.querySelector('div[class*="ProblemStatement_problemStatement"]');
+                        if (!contentEl) return "";
+
+                        const clone = contentEl.cloneNode(true);
+                        const sups = clone.querySelectorAll('sup');
+                        sups.forEach(sup => {
+                            const text = sup.textContent;
+                            sup.replaceWith(`^${text}`);
+                        });
+                        return clone.innerText;
+                    }
+                """)
                 
                 # Regex patterns for headers
                 # We look for "Input Format", "Input:", "Output Format", "Output:", "Constraints", "Sample"
                 # We want to find the FIRST occurrence of any of these to cut off the description.
                 
-                headers_pattern = r'(Input(?:\s+Format|)|Output(?:\s+Format|)|Constraints|Sample\s+\d+|Explanation|Note:)'
+                headers_pattern = r'(Input(?:\s+Format|)|Output(?:\s+Format|)|Constraints|Subtasks|Sample\s+\d+|Explanation|Note:)'
                 
                 # Split the text by the first header found to get the clean description
                 split_match = re.search(headers_pattern, raw_text, re.IGNORECASE)
@@ -119,15 +233,18 @@ def scrape_codechef_questions(tag: str, pages: int = 1):
                 else:
                     item["description"] = clean_text(raw_text)
 
-                # Now extract specific sections using regex as before, but maybe more robustly
-                input_match = re.search(r'Input(?:\s+Format|):?(.+?)(?=Output|Constraints|Sample|Explanation)', raw_text, re.DOTALL | re.IGNORECASE)
+                # Now extract specific sections using regex
+                input_match = re.search(r'Input(?:\s+Format|):?(.+?)(?=Output|Constraints|Subtasks|Sample|Explanation)', raw_text, re.DOTALL | re.IGNORECASE)
                 item["input_format"] = clean_text(input_match.group(1)) if input_match else ""
                 
-                output_match = re.search(r'Output(?:\s+Format|):?(.+?)(?=Constraints|Sample|Explanation|Input)', raw_text, re.DOTALL | re.IGNORECASE)
+                output_match = re.search(r'Output(?:\s+Format|):?(.+?)(?=Constraints|Subtasks|Sample|Explanation|Input)', raw_text, re.DOTALL | re.IGNORECASE)
                 item["output_format"] = clean_text(output_match.group(1)) if output_match else ""
                 
-                constraints_match = re.search(r'Constraints:?(.+?)(?=Sample|Explanation|Input|Output)', raw_text, re.DOTALL | re.IGNORECASE)
+                constraints_match = re.search(r'Constraints:?(.+?)(?=Subtasks|Sample|Explanation|Input|Output)', raw_text, re.DOTALL | re.IGNORECASE)
                 item["constraints"] = clean_text(constraints_match.group(1)) if constraints_match else ""
+
+                subtasks_match = re.search(r'Subtasks:?(.+?)(?=Sample|Explanation|Input|Output|Constraints)', raw_text, re.DOTALL | re.IGNORECASE)
+                item["subtasks"] = clean_text(subtasks_match.group(1)) if subtasks_match else ""
                 
                 # Extract samples
                 # We want to preserve newlines for samples so they are readable
