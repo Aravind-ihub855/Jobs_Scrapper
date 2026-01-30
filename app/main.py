@@ -475,13 +475,21 @@ async def scrape_hackerrank(
         track, subdomains, status, difficulty, skills, pages
     )
     
+    saved_count = 0
     if questions:
         for q in questions:
-            await hackerrank_collection.update_one(
-                {"slug": q["slug"]},
-                {"$set": q},
-                upsert=True
-            )
+            if "slug" in q and q["slug"]:
+                result = await hackerrank_collection.update_one(
+                    {"slug": q["slug"]},
+                    {"$set": q},
+                    upsert=True
+                )
+                if result.upserted_id or result.modified_count > 0:
+                    saved_count += 1
+            else:
+                await hackerrank_collection.insert_one(q)
+                saved_count += 1
+                
             if "_id" in q:
                 q["_id"] = str(q["_id"])
                 
@@ -493,7 +501,10 @@ async def scrape_hackerrank(
             "subdomains": subdomains,
             "skills": skills
         },
-        "count": len(questions),
+        "pages": pages,
+        "total_questions_scraped": len(questions),
+        "new_or_updated_questions": saved_count,
+        "status": "success",
         "data": questions
     }
 

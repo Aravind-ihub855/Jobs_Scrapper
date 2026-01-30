@@ -265,6 +265,10 @@ def scrape_hackerrank_questions(
                 slug = item.get("slug")
                 if not slug:
                     continue
+                
+                # Avoid duplicates in the list if slug appears again
+                if any(q['slug'] == slug for q in questions):
+                    continue
                     
                 # Fetch full details
                 detail_url = f"https://www.hackerrank.com/rest/contests/master/challenges/{slug}"
